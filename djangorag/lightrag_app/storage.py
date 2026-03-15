@@ -16,7 +16,6 @@ except ImportError:
 
 try:
     import chromadb
-    from chromadb.config import Settings as ChromaSettings
 except ImportError:
     chromadb = None
 
@@ -386,18 +385,18 @@ class ChromaVectorStorage:
                 "chromadb is not installed. Install with: pip install chromadb"
             )
 
-        chroma_settings = getattr(settings, "CHROMADB", {})
-
         try:
-            if chroma_settings.get("IN_MEMORY", False):
+            if getattr(settings, "CHROMADB_IN_MEMORY", False):
                 self.client = chromadb.Client()
             else:
-                persist_directory = chroma_settings.get(
-                    "PERSIST_DIRECTORY", "./chromadb_storage"
-                )
+                persist_directory = getattr(settings, "CHROMADB_DIR", None)
+                if not persist_directory:
+                    raise RuntimeError(
+                        "CHROMADB_DIR must be set in settings.py for persistent storage."
+                    )
                 os.makedirs(persist_directory, exist_ok=True)
 
-                self.client = chromadb.PersistentClient(path=persist_directory)
+                self.client = chromadb.PersistentClient(path=str(persist_directory))
 
             self._initialize_collections()
         except Exception as e:
@@ -405,14 +404,18 @@ class ChromaVectorStorage:
 
     def _initialize_collections(self):
         """Initialize collections for different vector types"""
-        collection_names = ["entities", "relations", "documents"]
+        collection_map = {
+            "entity": "entity_django_lightrag",
+            "relation": "relation_django_lightrag",
+            "document": "document_django_lightrag",
+        }
 
-        for name in collection_names:
+        for vector_type, name in collection_map.items():
             try:
                 collection = self.client.get_or_create_collection(
                     name=name, metadata={"type": name}
                 )
-                self.collections[name] = collection
+                self.collections[vector_type] = collection
             except Exception as e:
                 raise RuntimeError(f"Failed to initialize collection {name}: {e}")
 

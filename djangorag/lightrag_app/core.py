@@ -227,15 +227,17 @@ class LightRAGCore:
             defaults={"embedding": embedding},
         )
 
-        # Save to vector storage - skip for now to avoid ChromaDB issues
-        # self.vector_storage.add_embedding(
-        #     'document', document.id, embedding,
-        #     metadata={
-        #         'content': document.content[:500],  # First 500 chars
-        #         'document_id': document.id,
-        #         'document_title': document.title,
-        #     }
-        # )
+        # Save to vector storage
+        self.vector_storage.add_embedding(
+            "document",
+            document.id,
+            embedding,
+            metadata={
+                "content": document.content[:500],  # First 500 chars
+                "document_id": document.id,
+                "document_title": document.title,
+            },
+        )
 
     def query(self, query_text: str, param: QueryParam = None) -> QueryResult:
         """Query the RAG system"""
@@ -285,9 +287,19 @@ class LightRAGCore:
         self, query_embedding: List[float], top_k: int
     ) -> List[Document]:
         """Retrieve relevant documents using vector similarity"""
-        # For now, just return recent documents to avoid vector storage issues
-        documents = list(Document.objects.all().order_by("-created_at")[:top_k])
-        return documents
+        results = self.vector_storage.search_similar(
+            "document", query_embedding, top_k=top_k
+        )
+        if not results:
+            return list(Document.objects.all().order_by("-created_at")[:top_k])
+
+        doc_ids = [item["id"] for item in results]
+        documents_by_id = {
+            doc.id: doc for doc in Document.objects.filter(id__in=doc_ids)
+        }
+        return [
+            documents_by_id[doc_id] for doc_id in doc_ids if doc_id in documents_by_id
+        ]
 
     def _retrieve_knowledge_graph(
         self, query_text: str, top_k: int
@@ -446,7 +458,7 @@ The actual implementation would use the context to provide a detailed, relevant 
             document = Document.objects.get(id=document_id)
 
             # Get document embedding to delete from vector storage (skipped for now)
-            # await self.vector_storage.delete_embedding('document', document.id)
+            self.vector_storage.delete_embedding("document", document.id)
 
             # Get entities and relations to delete from graph storage (skipped for now)
             # entities = await sync_to_async(list)(Entity.objects.all()))
