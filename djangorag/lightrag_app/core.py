@@ -9,6 +9,8 @@ import uuid
 import tiktoken
 from django.conf import settings
 
+from embed_gen.generator import generate_embeddings
+
 from .models import (
     Document,
     Entity,
@@ -78,6 +80,13 @@ class LightRAGCore:
         self.max_relation_tokens = self.config.get("MAX_RELATION_TOKENS", 4000)
         self.max_total_tokens = self.config.get("MAX_TOTAL_TOKENS", 12000)
         self.cosine_threshold = self.config.get("COSINE_THRESHOLD", 0.2)
+        self.embedding_provider = self.config.get("EMBEDDING_PROVIDER", "LMStudio")
+        self.embedding_model = self.config.get(
+            "EMBEDDING_MODEL", "text-embedding-embeddinggemma-300m"
+        )
+        self.embedding_base_url = self.config.get(
+            "EMBEDDING_BASE_URL", "http://localhost:1234"
+        )
 
     def _generate_id(self, content: str) -> str:
         """Generate a consistent ID from content"""
@@ -214,10 +223,7 @@ class LightRAGCore:
 
     def _generate_document_embeddings(self, document: Document):
         """Generate embeddings for a document"""
-        # This is a placeholder - in practice, you'd use an embedding model
-        # Generate dummy embedding for demonstration
-        embedding_dim = 1536  # Typical embedding dimension
-        embedding = [0.0] * embedding_dim
+        embedding = self._get_embeddings([document.content])[0]
 
         # Save to database
         VectorEmbedding.objects.update_or_create(
@@ -279,9 +285,22 @@ class LightRAGCore:
 
     def _get_query_embedding(self, query_text: str) -> List[float]:
         """Get embedding for query text"""
-        # Placeholder - in practice, use embedding model
-        embedding_dim = 1536
-        return [0.0] * embedding_dim
+        return self._get_embeddings([query_text])[0]
+
+    def _get_embeddings(self, texts: List[str]) -> List[List[float]]:
+        """Generate embeddings for a list of texts."""
+        if not texts:
+            raise ValueError("No texts provided for embedding generation.")
+
+        try:
+            return generate_embeddings(
+                texts=texts,
+                model_name=self.embedding_model,
+                provider=self.embedding_provider,
+                base_url=self.embedding_base_url,
+            )
+        except Exception as exc:
+            raise RuntimeError(f"Failed to generate embeddings: {exc}") from exc
 
     def _retrieve_documents(
         self, query_embedding: List[float], top_k: int
