@@ -7,7 +7,6 @@ from ninja import Router, File, Form
 from ninja.files import UploadedFile
 
 from .core import LightRAGCore, QueryParam
-from .models import TextChunk
 from .schemas import (
     DocumentIngestSchema,
     DocumentSchema,
@@ -16,7 +15,6 @@ from .schemas import (
     QueryResultSchema,
     EntitySchema,
     RelationSchema,
-    ChunkSchema,
     ErrorResponseSchema,
     SuccessResponseSchema,
 )
@@ -215,17 +213,6 @@ def list_relations(request, limit: Optional[int] = None):
             return [RelationSchema(**relation) for relation in relations]
         finally:
             core.graph_storage.close()
-
-    except Exception as e:
-        return 400, {"error": "list_failed", "message": str(e)}
-
-
-@router.get("/chunks", response={200: List[ChunkSchema], 400: ErrorResponseSchema})
-def list_chunks(request, limit: Optional[int] = None):
-    """List chunks in the system"""
-    try:
-        chunks = TextChunk.objects.all()[:limit] if limit else TextChunk.objects.all()
-        return [ChunkSchema.from_orm(chunk) for chunk in chunks]
 
     except Exception as e:
         return 400, {"error": "list_failed", "message": str(e)}

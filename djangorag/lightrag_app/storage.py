@@ -21,15 +21,7 @@ except ImportError:
     chromadb = None
 
 from django.conf import settings
-from .models import (
-    Entity,
-    Relation,
-    TextChunk,
-    VectorEmbedding,
-    CacheEntry,
-    Document,
-    DocumentStatus,
-)
+from .models import Entity, Relation, VectorEmbedding, CacheEntry
 
 
 class LadybugGraphStorage:
@@ -92,29 +84,10 @@ class LadybugGraphStorage:
                 )
             """)
 
-            self.conn.execute("""
-                CREATE NODE TABLE IF NOT EXISTS Chunk (
-                    chunk_id STRING PRIMARY KEY,
-                    content STRING,
-                    tokens INT,
-                    chunk_order_index INT,
-                    document_id STRING,
-                    metadata STRING,
-                    created_at TIMESTAMP,
-                    updated_at TIMESTAMP
-                )
-            """)
-
             # Create relationship tables
             self.conn.execute("""
-                CREATE REL TABLE IF NOT EXISTS CONTAINS (
-                    FROM Document TO Chunk
-                )
-            """)
-
-            self.conn.execute("""
                 CREATE REL TABLE IF NOT EXISTS MENTIONS (
-                    FROM Chunk TO Entity
+                    FROM Document TO Entity
                 )
             """)
 
@@ -432,7 +405,7 @@ class ChromaVectorStorage:
 
     def _initialize_collections(self):
         """Initialize collections for different vector types"""
-        collection_names = ["entities", "relations", "chunks"]
+        collection_names = ["entities", "relations", "documents"]
 
         for name in collection_names:
             try:

@@ -66,7 +66,7 @@ def sample_document_content():
     """Sample document content for testing"""
     return """
     This is a sample document for testing the LightRAG Django app.
-    It contains multiple sentences and should be suitable for chunking.
+    It contains multiple sentences and should be suitable for document ingestion.
     The content is designed to test various aspects of the RAG system,
     including text processing, entity extraction, and query functionality.
 
@@ -74,7 +74,7 @@ def sample_document_content():
     Entities: Django (framework), LightRAG (system), ChromaDB (vector DB), LadybugDB (graph DB).
 
     This document should provide enough content to test:
-    1. Text chunking algorithms
+    1. Document ingestion
     2. Entity extraction (mock)
     3. Relation extraction (mock)
     4. Vector embedding generation (mock)

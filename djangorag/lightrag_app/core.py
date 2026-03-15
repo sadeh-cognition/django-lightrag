@@ -13,15 +13,9 @@ from django.utils import timezone
 
 from .models import (
     Document,
-    DocumentStatus,
-    TextChunk,
     Entity,
     Relation,
-    EntityChunk,
-    RelationChunk,
     VectorEmbedding,
-    CacheEntry,
-    ProcessingJob,
 )
 from .storage import LadybugGraphStorage, ChromaVectorStorage
 
@@ -81,8 +75,6 @@ class LightRAGCore:
 
         # Load configuration from settings
         self.config = getattr(settings, "LIGHTRAG", {})
-        self.chunk_size = self.config.get("CHUNK_SIZE", 1200)
-        self.chunk_overlap = self.config.get("CHUNK_OVERLAP_SIZE", 100)
         self.top_k = self.config.get("TOP_K", 10)
         self.max_entity_tokens = self.config.get("MAX_ENTITY_TOKENS", 8000)
         self.max_relation_tokens = self.config.get("MAX_RELATION_TOKENS", 4000)
@@ -92,46 +84,6 @@ class LightRAGCore:
     def _generate_id(self, content: str) -> str:
         """Generate a consistent ID from content"""
         return hashlib.md5(content.encode()).hexdigest()
-
-    def _chunk_text(
-        self,
-        text: str,
-        chunk_size: Optional[int] = None,
-        chunk_overlap: Optional[int] = None,
-    ) -> List[Dict[str, Any]]:
-        """Split text into chunks"""
-        chunk_size = chunk_size or self.chunk_size
-        chunk_overlap = chunk_overlap or self.chunk_overlap
-
-        tokens = self.tokenizer.encode(text)
-        chunks = []
-
-        start = 0
-        chunk_index = 0
-
-        while start < len(tokens):
-            end = min(start + chunk_size, len(tokens))
-            chunk_tokens = tokens[start:end]
-            chunk_text = self.tokenizer.decode(chunk_tokens)
-
-            chunks.append(
-                {
-                    "id": self._generate_id(f"{text}_{chunk_index}"),
-                    "content": chunk_text,
-                    "tokens": len(chunk_tokens),
-                    "chunk_order_index": chunk_index,
-                    "start_pos": start,
-                    "end_pos": end,
-                }
-            )
-
-            if end >= len(tokens):
-                break
-
-            start = end - chunk_overlap
-            chunk_index += 1
-
-        return chunks
 
     def ingest_document(
         self,
@@ -158,35 +110,21 @@ class LightRAGCore:
         # Update status to processing
         doc_status = document.status
         doc_status.status = "processing"
+        doc_status.started_at = timezone.now()
         doc_status.save()
 
         try:
-            # Chunk the document
-            chunks = self._chunk_text(content)
-
-            # Save chunks to database
-            saved_chunks = []
-            for chunk_data in chunks:
-                chunk = TextChunk.objects.create(
-                    id=chunk_data["id"],
-                    document=document,
-                    content=chunk_data["content"],
-                    tokens=chunk_data["tokens"],
-                    chunk_order_index=chunk_data["chunk_order_index"],
-                    metadata=chunk_data,
-                )
-                saved_chunks.append(chunk)
-
             # Extract entities and relations (simplified version)
-            self._extract_knowledge_graph(saved_chunks)
+            self._extract_knowledge_graph_from_document(document)
 
-            # Generate embeddings for chunks
-            self._generate_chunk_embeddings(saved_chunks)
+            # Generate embeddings for document
+            self._generate_document_embeddings(document)
 
             # Update status to completed
             doc_status.status = "processed"
-            doc_status.chunks_count = len(chunks)
-            doc_status.chunks_list = [chunk.id for chunk in saved_chunks]
+            doc_status.documents_count = 1
+            doc_status.documents_list = [document.id]
+            doc_status.completed_at = timezone.now()
             doc_status.save()
 
             return document_id
@@ -195,134 +133,139 @@ class LightRAGCore:
             # Update status to failed
             doc_status.status = "failed"
             doc_status.error_message = str(e)
+            doc_status.completed_at = timezone.now()
             doc_status.save()
             raise
 
-    def _extract_knowledge_graph(self, chunks: List[TextChunk]):
-        """Extract entities and relations from chunks"""
+    def _extract_knowledge_graph_from_document(self, document: Document):
+        """Extract entities and relations from a document"""
         # This is a simplified version - in practice, you'd use LLM for extraction
-        for chunk in chunks:
-            # Simple entity extraction (placeholder)
-            entities = self._extract_entities_from_chunk(chunk)
+        # Simple entity extraction (placeholder)
+        entities = self._extract_entities_from_document(document)
 
-            # Save entities
-            for entity_data in entities:
-                entity, created = Entity.objects.get_or_create(
-                    id=entity_data["id"],
-                    defaults={
-                        "name": entity_data["name"],
-                        "entity_type": entity_data["entity_type"],
-                        "description": entity_data.get("description", ""),
-                        "source_ids": [chunk.id],
-                        "metadata": entity_data.get("metadata", {}),
-                    },
-                )
+        # Save entities
+        for entity_data in entities:
+            entity, created = Entity.objects.get_or_create(
+                id=entity_data["id"],
+                defaults={
+                    "name": entity_data["name"],
+                    "entity_type": entity_data["entity_type"],
+                    "description": entity_data.get("description", ""),
+                    "source_ids": [document.id],
+                    "file_paths": [document.file_path] if document.file_path else [],
+                    "metadata": entity_data.get("metadata", {}),
+                },
+            )
 
-                if not created:
-                    # Update existing entity
-                    if chunk.id not in entity.source_ids:
-                        entity.source_ids.append(chunk.id)
-                        entity.save()
+            if not created:
+                # Update existing entity
+                updated = False
+                if document.id not in entity.source_ids:
+                    entity.source_ids.append(document.id)
+                    updated = True
+                if document.file_path and document.file_path not in entity.file_paths:
+                    entity.file_paths.append(document.file_path)
+                    updated = True
+                if updated:
+                    entity.save()
 
-                # Add to graph storage
-                self.graph_storage.add_entity(
-                    {
-                        "id": entity.id,
-                        "name": entity.name,
-                        "entity_type": entity.entity_type,
-                        "description": entity.description,
-                        "metadata": entity.metadata,
-                    }
-                )
+            # Add to graph storage
+            self.graph_storage.add_entity(
+                {
+                    "id": entity.id,
+                    "name": entity.name,
+                    "entity_type": entity.entity_type,
+                    "description": entity.description,
+                    "metadata": entity.metadata,
+                }
+            )
 
-                # Create entity-chunk mapping
-                EntityChunk.objects.get_or_create(
-                    id=f"{entity.id}_{chunk.id}", entity=entity, chunk=chunk
-                )
+        # Simple relation extraction (placeholder)
+        relations = self._extract_relations_from_document(document, entities)
 
-            # Simple relation extraction (placeholder)
-            relations = self._extract_relations_from_chunk(chunk, entities)
+        # Save relations
+        for relation_data in relations:
+            relation, created = Relation.objects.get_or_create(
+                id=relation_data["id"],
+                defaults={
+                    "source_entity": Entity.objects.get(
+                        id=relation_data["source_entity"]
+                    ),
+                    "target_entity": Entity.objects.get(
+                        id=relation_data["target_entity"]
+                    ),
+                    "relation_type": relation_data["relation_type"],
+                    "description": relation_data.get("description", ""),
+                    "source_ids": [document.id],
+                    "file_paths": [document.file_path] if document.file_path else [],
+                    "metadata": relation_data.get("metadata", {}),
+                },
+            )
 
-            # Save relations
-            for relation_data in relations:
-                relation, created = Relation.objects.get_or_create(
-                    id=relation_data["id"],
-                    defaults={
-                        "source_entity": Entity.objects.get(
-                            id=relation_data["source_entity"]
-                        ),
-                        "target_entity": Entity.objects.get(
-                            id=relation_data["target_entity"]
-                        ),
-                        "relation_type": relation_data["relation_type"],
-                        "description": relation_data.get("description", ""),
-                        "source_ids": [chunk.id],
-                        "metadata": relation_data.get("metadata", {}),
-                    },
-                )
+            if not created:
+                # Update existing relation
+                updated = False
+                if document.id not in relation.source_ids:
+                    relation.source_ids.append(document.id)
+                    updated = True
+                if document.file_path and document.file_path not in relation.file_paths:
+                    relation.file_paths.append(document.file_path)
+                    updated = True
+                if updated:
+                    relation.save()
 
-                if not created:
-                    # Update existing relation
-                    if chunk.id not in relation.source_ids:
-                        relation.source_ids.append(chunk.id)
-                        relation.save()
+            # Add to graph storage
+            self.graph_storage.add_relation(
+                {
+                    "id": relation.id,
+                    "source_entity": relation.source_entity.id,
+                    "target_entity": relation.target_entity.id,
+                    "relation_type": relation.relation_type,
+                    "description": relation.description,
+                    "metadata": relation.metadata,
+                }
+            )
 
-                # Add to graph storage
-                self.graph_storage.add_relation(
-                    {
-                        "id": relation.id,
-                        "source_entity": relation.source_entity.id,
-                        "target_entity": relation.target_entity.id,
-                        "relation_type": relation.relation_type,
-                        "description": relation.description,
-                        "metadata": relation.metadata,
-                    }
-                )
-
-                # Create relation-chunk mapping
-                RelationChunk.objects.get_or_create(
-                    id=f"{relation.id}_{chunk.id}", relation=relation, chunk=chunk
-                )
-
-    def _extract_entities_from_chunk(self, chunk: TextChunk) -> List[Dict[str, Any]]:
-        """Extract entities from a text chunk (simplified placeholder)"""
+    def _extract_entities_from_document(
+        self, document: Document
+    ) -> List[Dict[str, Any]]:
+        """Extract entities from a document (simplified placeholder)"""
         # In practice, this would use an LLM to extract entities
         # For now, return empty list as placeholder
         return []
 
-    def _extract_relations_from_chunk(
-        self, chunk: TextChunk, entities: List[Dict[str, Any]]
+    def _extract_relations_from_document(
+        self, document: Document, entities: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
-        """Extract relations from a text chunk (simplified placeholder)"""
+        """Extract relations from a document (simplified placeholder)"""
         # In practice, this would use an LLM to extract relations
         # For now, return empty list as placeholder
         return []
 
-    def _generate_chunk_embeddings(self, chunks: List[TextChunk]):
-        """Generate embeddings for text chunks"""
+    def _generate_document_embeddings(self, document: Document):
+        """Generate embeddings for a document"""
         # This is a placeholder - in practice, you'd use an embedding model
-        for chunk in chunks:
-            # Generate dummy embedding for demonstration
-            embedding_dim = 1536  # Typical embedding dimension
-            embedding = [0.0] * embedding_dim
+        # Generate dummy embedding for demonstration
+        embedding_dim = 1536  # Typical embedding dimension
+        embedding = [0.0] * embedding_dim
 
-            # Save to database
-            VectorEmbedding.objects.update_or_create(
-                id=f"chunk_{chunk.id}",
-                vector_type="chunk",
-                content_id=chunk.id,
-                defaults={"embedding": embedding},
-            )
+        # Save to database
+        VectorEmbedding.objects.update_or_create(
+            id=f"document_{document.id}",
+            vector_type="document",
+            content_id=document.id,
+            defaults={"embedding": embedding},
+        )
 
-            # Save to vector storage - skip for now to avoid ChromaDB issues
-            # self.vector_storage.add_embedding(
-            #     'chunk', chunk.id, embedding,
-            #     metadata={
-            #         'content': chunk.content[:500],  # First 500 chars
-            #         'document_id': chunk.document.id,
-            #         'chunk_order_index': chunk.chunk_order_index
-            #     }
-            # )
+        # Save to vector storage - skip for now to avoid ChromaDB issues
+        # self.vector_storage.add_embedding(
+        #     'document', document.id, embedding,
+        #     metadata={
+        #         'content': document.content[:500],  # First 500 chars
+        #         'document_id': document.id,
+        #         'document_title': document.title,
+        #     }
+        # )
 
     def query(self, query_text: str, param: QueryParam = None) -> QueryResult:
         """Query the RAG system"""
@@ -334,8 +277,8 @@ class LightRAGCore:
         # Generate query embedding
         query_embedding = self._get_query_embedding(query_text)
 
-        # Retrieve relevant chunks
-        relevant_chunks = self._retrieve_chunks(query_embedding, param.top_k)
+        # Retrieve relevant documents
+        relevant_documents = self._retrieve_documents(query_embedding, param.top_k)
 
         # Retrieve relevant entities and relations
         relevant_entities, relevant_relations = self._retrieve_knowledge_graph(
@@ -344,7 +287,7 @@ class LightRAGCore:
 
         # Build context
         context = self._build_context(
-            relevant_chunks, relevant_entities, relevant_relations, param
+            relevant_documents, relevant_entities, relevant_relations, param
         )
 
         # Generate response (placeholder)
@@ -355,7 +298,7 @@ class LightRAGCore:
         return QueryResult(
             response=response,
             sources=self._format_sources(
-                relevant_chunks, relevant_entities, relevant_relations
+                relevant_documents, relevant_entities, relevant_relations
             ),
             context=context,
             query_time=query_time,
@@ -368,13 +311,13 @@ class LightRAGCore:
         embedding_dim = 1536
         return [0.0] * embedding_dim
 
-    def _retrieve_chunks(
+    def _retrieve_documents(
         self, query_embedding: List[float], top_k: int
-    ) -> List[TextChunk]:
-        """Retrieve relevant chunks using vector similarity"""
-        # For now, just return recent chunks to avoid vector storage issues
-        chunks = list(TextChunk.objects.all().order_by("-created_at")[:top_k])
-        return chunks
+    ) -> List[Document]:
+        """Retrieve relevant documents using vector similarity"""
+        # For now, just return recent documents to avoid vector storage issues
+        documents = list(Document.objects.all().order_by("-created_at")[:top_k])
+        return documents
 
     def _retrieve_knowledge_graph(
         self, query_text: str, top_k: int
@@ -388,33 +331,33 @@ class LightRAGCore:
 
     def _build_context(
         self,
-        chunks: List[TextChunk],
+        documents: List[Document],
         entities: List[Entity],
         relations: List[Relation],
         param: QueryParam,
     ) -> Dict[str, Any]:
         """Build context for response generation"""
-        context = {"chunks": [], "entities": [], "relations": [], "total_tokens": 0}
+        context = {"documents": [], "entities": [], "relations": [], "total_tokens": 0}
 
-        # Add chunks
-        for chunk in chunks:
-            chunk_text = chunk.content
+        # Add documents
+        for document in documents:
+            document_text = document.content
             if (
-                context["total_tokens"] + self.tokenizer.count_tokens(chunk_text)
+                context["total_tokens"] + self.tokenizer.count_tokens(document_text)
                 > param.max_tokens
             ):
-                chunk_text = self.tokenizer.truncate_by_tokens(
-                    chunk_text, param.max_tokens - context["total_tokens"]
+                document_text = self.tokenizer.truncate_by_tokens(
+                    document_text, param.max_tokens - context["total_tokens"]
                 )
 
-            context["chunks"].append(
+            context["documents"].append(
                 {
-                    "content": chunk_text,
-                    "document_id": chunk.document.id,
-                    "chunk_order_index": chunk.chunk_order_index,
+                    "content": document_text,
+                    "document_id": document.id,
+                    "document_title": document.title or document.id[:50],
                 }
             )
-            context["total_tokens"] += self.tokenizer.count_tokens(chunk_text)
+            context["total_tokens"] += self.tokenizer.count_tokens(document_text)
 
         # Add entities
         for entity in entities:
@@ -467,7 +410,7 @@ class LightRAGCore:
 This is a placeholder response. In a real implementation, this would be generated by an LLM using the retrieved context.
 
 Context summary:
-- {len(context["chunks"])} relevant text chunks
+- {len(context["documents"])} relevant documents
 - {len(context["entities"])} relevant entities
 - {len(context["relations"])} relevant relations
 - Total context tokens: {context["total_tokens"]}
@@ -477,22 +420,24 @@ The actual implementation would use the context to provide a detailed, relevant 
         return response
 
     def _format_sources(
-        self, chunks: List[TextChunk], entities: List[Entity], relations: List[Relation]
+        self,
+        documents: List[Document],
+        entities: List[Entity],
+        relations: List[Relation],
     ) -> List[Dict[str, Any]]:
         """Format sources for the response"""
         sources = []
 
-        for chunk in chunks:
+        for document in documents:
             sources.append(
                 {
-                    "type": "chunk",
-                    "id": chunk.id,
-                    "content": chunk.content[:200] + "..."
-                    if len(chunk.content) > 200
-                    else chunk.content,
-                    "document_id": chunk.document.id,
-                    "document_title": chunk.document.title or chunk.document.id[:50],
-                    "chunk_order_index": chunk.chunk_order_index,
+                    "type": "document",
+                    "id": document.id,
+                    "content": document.content[:200] + "..."
+                    if len(document.content) > 200
+                    else document.content,
+                    "document_id": document.id,
+                    "document_title": document.title or document.id[:50],
                 }
             )
 
@@ -530,10 +475,8 @@ The actual implementation would use the context to provide a detailed, relevant 
         try:
             document = Document.objects.get(id=document_id)
 
-            # Get chunks to delete from vector storage (skipped for now)
-            # chunks = await sync_to_async(list)(TextChunk.objects.filter(document=document))
-            # for chunk in chunks:
-            #     await self.vector_storage.delete_embedding('chunk', chunk.id)
+            # Get document embedding to delete from vector storage (skipped for now)
+            # await self.vector_storage.delete_embedding('document', document.id)
 
             # Get entities and relations to delete from graph storage (skipped for now)
             # entities = await sync_to_async(list)(Entity.objects.all()))
@@ -560,8 +503,8 @@ The actual implementation would use the context to provide a detailed, relevant 
                 "document_id": document.id,
                 "title": document.title,
                 "status": status.status,
-                "chunks_count": status.chunks_count,
-                "chunks_list": status.chunks_list,
+                "documents_count": status.documents_count,
+                "documents_list": status.documents_list,
                 "error_message": status.error_message,
                 "started_at": status.started_at.isoformat()
                 if status.started_at
@@ -590,7 +533,7 @@ The actual implementation would use the context to provide a detailed, relevant 
                     "id": doc.id,
                     "title": doc.title,
                     "status": doc.status.status,
-                    "chunks_count": doc.status.chunks_count,
+                    "documents_count": doc.status.documents_count,
                     "created_at": doc.created_at.isoformat(),
                     "updated_at": doc.updated_at.isoformat(),
                 }

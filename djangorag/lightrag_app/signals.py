@@ -16,12 +16,8 @@ def create_document_status(sender, instance, created, **kwargs):
 @receiver(pre_delete, sender=Document)
 def cleanup_document_data(sender, instance, **kwargs):
     """Clean up related data when a Document is deleted"""
-    from .models import TextChunk, EntityChunk, RelationChunk
+    from .models import VectorEmbedding
 
-    # Delete related chunks
-    TextChunk.objects.filter(document=instance).delete()
-
-    # Clean up entity and relation chunk mappings
-    chunk_ids = TextChunk.objects.filter(document=instance).values_list("id", flat=True)
-    EntityChunk.objects.filter(chunk_id__in=chunk_ids).delete()
-    RelationChunk.objects.filter(chunk_id__in=chunk_ids).delete()
+    VectorEmbedding.objects.filter(
+        vector_type="document", content_id=instance.id
+    ).delete()

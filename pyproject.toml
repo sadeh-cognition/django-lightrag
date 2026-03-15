@@ -40,7 +40,6 @@ dependencies = [
     "aiofiles>=23.0.0",
     "numpy>=1.24.0",
     "asyncio-throttle>=1.0.2",
-    "chonkie>=0.1.0",
     "pytest-django>=4.11.1",
 ]
 

@@ -5,7 +5,7 @@ Tests for LightRAG core functionality.
 from unittest.mock import Mock, patch
 from django.test import TestCase
 from django.contrib.auth.models import User
-from lightrag_app.models import Document, TextChunk
+from lightrag_app.models import Document
 from lightrag_app.core import LightRAGCore, QueryParam, Tokenizer
 
 
@@ -73,26 +73,9 @@ class LightRAGCoreTest(TestCase):
         id3 = self.core._generate_id(different_content)
         self.assertNotEqual(id1, id3)  # Should be different for different content
 
-    def test_chunk_text(self):
-        """Test text chunking"""
-        text = "This is a test text that should be split into multiple chunks. " * 10
-        chunks = self.core._chunk_text(text, chunk_size=50, chunk_overlap=10)
-
-        self.assertIsInstance(chunks, list)
-        self.assertGreater(len(chunks), 1)
-
-        # Check chunk structure
-        for chunk in chunks:
-            self.assertIn("id", chunk)
-            self.assertIn("content", chunk)
-            self.assertIn("tokens", chunk)
-            self.assertIn("chunk_order_index", chunk)
-            self.assertIsInstance(chunk["tokens"], int)
-            self.assertGreater(chunk["tokens"], 0)
-
-    @patch("lightrag_app.core.LightRAGCore._extract_entities_from_chunk")
-    @patch("lightrag_app.core.LightRAGCore._extract_relations_from_chunk")
-    @patch("lightrag_app.core.LightRAGCore._generate_chunk_embeddings")
+    @patch("lightrag_app.core.LightRAGCore._extract_entities_from_document")
+    @patch("lightrag_app.core.LightRAGCore._extract_relations_from_document")
+    @patch("lightrag_app.core.LightRAGCore._generate_document_embeddings")
     def test_ingest_document(self, mock_embeddings, mock_relations, mock_entities):
         """Test document ingestion"""
         # Mock the extraction methods to return empty lists
@@ -118,12 +101,8 @@ class LightRAGCoreTest(TestCase):
 
         # Verify status was updated
         self.assertEqual(document.status.status, "processed")
-        self.assertEqual(document.status.chunks_count, 1)
+        self.assertEqual(document.status.documents_count, 1)
         self.assertIsNotNone(document.status.completed_at)
-
-        # Verify chunks were created
-        chunks = TextChunk.objects.filter(document=document)
-        self.assertEqual(chunks.count(), 1)
 
     def test_ingest_document_failure(self):
         """Test document ingestion failure handling"""
@@ -131,7 +110,9 @@ class LightRAGCoreTest(TestCase):
 
         # Mock an exception during ingestion
         with patch.object(
-            self.core, "_chunk_text", side_effect=Exception("Test error")
+            self.core,
+            "_extract_knowledge_graph_from_document",
+            side_effect=Exception("Test error"),
         ):
             with self.assertRaises(Exception):
                 self.core.ingest_document(content=content, title="Test")
@@ -144,14 +125,14 @@ class LightRAGCoreTest(TestCase):
             self.assertEqual(doc.status.error_message, "Test error")
 
     @patch("lightrag_app.core.LightRAGCore._get_query_embedding")
-    @patch("lightrag_app.core.LightRAGCore._retrieve_chunks")
+    @patch("lightrag_app.core.LightRAGCore._retrieve_documents")
     @patch("lightrag_app.core.LightRAGCore._retrieve_knowledge_graph")
     @patch("lightrag_app.core.LightRAGCore._generate_response")
-    def test_query(self, mock_response, mock_kg, mock_chunks, mock_embedding):
+    def test_query(self, mock_response, mock_kg, mock_documents, mock_embedding):
         """Test RAG query functionality"""
         # Mock the dependencies
         mock_embedding.return_value = [0.0] * 1536  # Mock embedding
-        mock_chunks.return_value = []  # Empty chunks list
+        mock_documents.return_value = []  # Empty documents list
         mock_kg.return_value = ([], [])  # Empty entities and relations
         mock_response.return_value = "Test response"
 
@@ -169,7 +150,7 @@ class LightRAGCoreTest(TestCase):
 
         # Verify methods were called
         mock_embedding.assert_called_once_with(query_text)
-        mock_chunks.assert_called_once()
+        mock_documents.assert_called_once()
         mock_kg.assert_called_once()
         mock_response.assert_called_once()
 
@@ -234,7 +215,7 @@ class LightRAGCoreTest(TestCase):
             self.assertIn("id", doc)
             self.assertIn("title", doc)
             self.assertIn("status", doc)
-            self.assertIn("chunks_count", doc)
+            self.assertIn("documents_count", doc)
             self.assertIn("created_at", doc)
             self.assertIn("updated_at", doc)
 

@@ -4,7 +4,7 @@ Tests for LightRAG Django models.
 
 from django.test import TestCase
 from django.utils import timezone
-from lightrag_app.models import Document, TextChunk, Entity, Relation
+from lightrag_app.models import Document, Entity, Relation
 
 
 class DocumentModelTest(TestCase):
@@ -72,65 +72,20 @@ class DocumentStatusModelTest(TestCase):
 
         # Complete processing
         self.document.status.status = "processed"
-        self.document.status.chunks_count = 5
-        self.document.status.chunks_list = [
-            "chunk1",
-            "chunk2",
-            "chunk3",
-            "chunk4",
-            "chunk5",
+        self.document.status.documents_count = 5
+        self.document.status.documents_list = [
+            "doc1",
+            "doc2",
+            "doc3",
+            "doc4",
+            "doc5",
         ]
         self.document.status.completed_at = timezone.now()
         self.document.status.save()
         self.assertEqual(self.document.status.status, "processed")
-        self.assertEqual(self.document.status.chunks_count, 5)
-        self.assertEqual(len(self.document.status.chunks_list), 5)
+        self.assertEqual(self.document.status.documents_count, 5)
+        self.assertEqual(len(self.document.status.documents_list), 5)
         self.assertIsNotNone(self.document.status.completed_at)
-
-
-class TextChunkModelTest(TestCase):
-    """Test cases for TextChunk model"""
-
-    def setUp(self):
-        self.document = Document.objects.create(
-            id="test-doc-123",
-            title="Test Document",
-            content="This is a test document content.",
-        )
-        self.chunk = TextChunk.objects.create(
-            id="test-chunk-123",
-            document=self.document,
-            content="This is a test chunk content.",
-            tokens=10,
-            chunk_order_index=0,
-        )
-
-    def test_chunk_creation(self):
-        """Test chunk creation"""
-        self.assertEqual(self.chunk.id, "test-chunk-123")
-        self.assertEqual(self.chunk.document, self.document)
-        self.assertEqual(self.chunk.content, "This is a test chunk content.")
-        self.assertEqual(self.chunk.tokens, 10)
-        self.assertEqual(self.chunk.chunk_order_index, 0)
-
-    def test_chunk_str_representation(self):
-        """Test chunk string representation"""
-        expected = "Chunk 0 of test-doc-123"
-        self.assertEqual(str(self.chunk), expected)
-
-    def test_chunk_ordering(self):
-        """Test chunks are ordered by document and chunk_order_index"""
-        chunk2 = TextChunk.objects.create(
-            id="test-chunk-456",
-            document=self.document,
-            content="Second chunk content.",
-            tokens=8,
-            chunk_order_index=1,
-        )
-
-        chunks = TextChunk.objects.filter(document=self.document)
-        self.assertEqual(chunks[0], self.chunk)
-        self.assertEqual(chunks[1], chunk2)
 
 
 class EntityModelTest(TestCase):
@@ -142,7 +97,7 @@ class EntityModelTest(TestCase):
             name="Test Entity",
             entity_type="PERSON",
             description="A test person entity",
-            source_ids=["chunk1", "chunk2"],
+            source_ids=["doc1", "doc2"],
             file_paths=["/path/to/file1.txt", "/path/to/file2.txt"],
         )
 
@@ -152,7 +107,7 @@ class EntityModelTest(TestCase):
         self.assertEqual(self.entity.name, "Test Entity")
         self.assertEqual(self.entity.entity_type, "PERSON")
         self.assertEqual(self.entity.description, "A test person entity")
-        self.assertEqual(self.entity.source_ids, ["chunk1", "chunk2"])
+        self.assertEqual(self.entity.source_ids, ["doc1", "doc2"])
         self.assertEqual(
             self.entity.file_paths, ["/path/to/file1.txt", "/path/to/file2.txt"]
         )
@@ -186,7 +141,7 @@ class RelationModelTest(TestCase):
             target_entity=self.target_entity,
             relation_type="WORKS_FOR",
             description="Source works for target",
-            source_ids=["chunk1"],
+            source_ids=["doc1"],
             file_paths=["/path/to/file1.txt"],
             weight=1.5,
         )
@@ -198,7 +153,7 @@ class RelationModelTest(TestCase):
         self.assertEqual(self.relation.target_entity, self.target_entity)
         self.assertEqual(self.relation.relation_type, "WORKS_FOR")
         self.assertEqual(self.relation.description, "Source works for target")
-        self.assertEqual(self.relation.source_ids, ["chunk1"])
+        self.assertEqual(self.relation.source_ids, ["doc1"])
         self.assertEqual(self.relation.file_paths, ["/path/to/file1.txt"])
         self.assertEqual(self.relation.weight, 1.5)
 

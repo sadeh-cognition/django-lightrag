@@ -1,8 +1,6 @@
-import json
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
-from django.core.exceptions import ValidationError
 
 
 class Document(models.Model):
@@ -41,8 +39,8 @@ class DocumentStatus(models.Model):
         Document, on_delete=models.CASCADE, related_name="status"
     )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
-    chunks_count = models.IntegerField(default=0)
-    chunks_list = models.JSONField(default=list, blank=True)
+    documents_count = models.IntegerField(default=0)
+    documents_list = models.JSONField(default=list, blank=True)
     error_message = models.TextField(blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
@@ -59,31 +57,6 @@ class DocumentStatus(models.Model):
         return f"{self.document.id} - {self.status}"
 
 
-class TextChunk(models.Model):
-    """Text chunks from document processing"""
-
-    id = models.CharField(max_length=255, primary_key=True)
-    document = models.ForeignKey(
-        Document, on_delete=models.CASCADE, related_name="chunks"
-    )
-    content = models.TextField()
-    tokens = models.IntegerField()
-    chunk_order_index = models.IntegerField()
-    metadata = models.JSONField(default=dict, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        db_table = "lightrag_text_chunks"
-        ordering = ["document", "chunk_order_index"]
-        indexes = [
-            models.Index(fields=["document"]),
-        ]
-
-    def __str__(self):
-        return f"Chunk {self.chunk_order_index} of {self.document.id}"
-
-
 class Entity(models.Model):
     """Knowledge graph entities"""
 
@@ -91,7 +64,7 @@ class Entity(models.Model):
     name = models.CharField(max_length=500, db_index=True)
     entity_type = models.CharField(max_length=100)
     description = models.TextField(blank=True)
-    source_ids = models.JSONField(default=list, blank=True)  # List of chunk IDs
+    source_ids = models.JSONField(default=list, blank=True)  # List of document IDs
     file_paths = models.JSONField(default=list, blank=True)
     metadata = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -120,7 +93,7 @@ class Relation(models.Model):
     )
     relation_type = models.CharField(max_length=100)
     description = models.TextField(blank=True)
-    source_ids = models.JSONField(default=list, blank=True)  # List of chunk IDs
+    source_ids = models.JSONField(default=list, blank=True)  # List of document IDs
     file_paths = models.JSONField(default=list, blank=True)
     weight = models.FloatField(default=1.0)
     metadata = models.JSONField(default=dict, blank=True)
@@ -138,61 +111,13 @@ class Relation(models.Model):
         return f"{self.source_entity.name} -> {self.relation_type} -> {self.target_entity.name}"
 
 
-class EntityChunk(models.Model):
-    """Mapping between entities and chunks"""
-
-    id = models.CharField(max_length=255, primary_key=True)
-    entity = models.ForeignKey(
-        Entity, on_delete=models.CASCADE, related_name="entity_chunks"
-    )
-    chunk = models.ForeignKey(
-        TextChunk, on_delete=models.CASCADE, related_name="entity_chunks"
-    )
-    metadata = models.JSONField(default=dict, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        db_table = "lightrag_entity_chunks"
-        indexes = [
-            models.Index(fields=["entity"]),
-            models.Index(fields=["chunk"]),
-        ]
-
-    def __str__(self):
-        return f"Entity {self.entity.name} in Chunk {self.chunk.id}"
-
-
-class RelationChunk(models.Model):
-    """Mapping between relations and chunks"""
-
-    id = models.CharField(max_length=255, primary_key=True)
-    relation = models.ForeignKey(
-        Relation, on_delete=models.CASCADE, related_name="relation_chunks"
-    )
-    chunk = models.ForeignKey(
-        TextChunk, on_delete=models.CASCADE, related_name="relation_chunks"
-    )
-    metadata = models.JSONField(default=dict, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        db_table = "lightrag_relation_chunks"
-        indexes = [
-            models.Index(fields=["relation"]),
-            models.Index(fields=["chunk"]),
-        ]
-
-    def __str__(self):
-        return f"Relation {self.relation.id} in Chunk {self.chunk.id}"
-
-
 class VectorEmbedding(models.Model):
-    """Vector embeddings for entities, relations, and chunks"""
+    """Vector embeddings for entities, relations, and documents"""
 
     VECTOR_TYPES = [
         ("entity", "Entity"),
         ("relation", "Relation"),
-        ("chunk", "Chunk"),
+        ("document", "Document"),
     ]
 
     id = models.CharField(max_length=255, primary_key=True)
@@ -291,69 +216,3 @@ class ProcessingJob(models.Model):
 
     def __str__(self):
         return f"{self.job_type} job {self.id} - {self.status}"
-
-
-class ChunkConfig(models.Model):
-    """Configuration for document chunking strategies"""
-
-    CHUNK_STRATEGIES = [
-        ("semantic", "Semantic Chunker"),
-        ("recursive", "Recursive Character Splitter"),
-        ("fixed_size", "Fixed Size Chunker"),
-        ("token_based", "Token Based Chunker"),
-    ]
-
-    id = models.CharField(max_length=255, primary_key=True)
-    description = models.TextField(blank=True)
-    strategy = models.CharField(
-        max_length=50, choices=CHUNK_STRATEGIES, default="semantic"
-    )
-    config = models.JSONField(
-        default=dict, help_text="Configuration parameters for the chunking strategy"
-    )
-    is_default = models.BooleanField(default=False)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    def __str__(self):
-        return f"({self.strategy})"
-
-    def clean(self):
-        """Validate configuration based on strategy"""
-        super().clean()
-
-        if self.strategy == "semantic":
-            # Default semantic chunker configuration
-            default_config = {
-                "chunk_size": 400,
-                "min_chunk_size": 50,
-                "max_chunk_size": 1000,
-                "overlap": 50,
-                "threshold": 0.5,
-                "embedding_model": "all-MiniLM-L6-v2",
-            }
-        elif self.strategy == "recursive":
-            default_config = {
-                "chunk_size": 1000,
-                "chunk_overlap": 200,
-                "separators": ["\n\n", "\n", " ", ""],
-            }
-        elif self.strategy == "fixed_size":
-            default_config = {"chunk_size": 1000, "chunk_overlap": 200}
-        elif self.strategy == "token_based":
-            default_config = {
-                "chunk_size": 500,
-                "chunk_overlap": 50,
-                "encoding_name": "cl100k_base",
-            }
-        else:
-            default_config = {}
-
-        # Merge with provided config
-        merged_config = default_config.copy()
-        merged_config.update(self.config)
-        self.config = merged_config
-
-    def save(self, *args, **kwargs):
-        self.clean()
-        super().save(*args, **kwargs)

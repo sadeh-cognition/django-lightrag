@@ -16,7 +16,7 @@ class PipelineCancelledException(Exception):
     """Raised when a user cancels a pipeline operation."""
 
 
-class TextChunkSchema(TypedDict, total=False):
+class DocumentSchema(TypedDict, total=False):
     tokens: int
     content: str
     full_doc_id: str
@@ -481,7 +481,7 @@ def use_llm_func(
 
 
 def _truncate_entity_identifier(
-    identifier: str, limit: int, chunk_key: str, identifier_role: str
+    identifier: str, limit: int, document_key: str, identifier_role: str
 ) -> str:
     """Truncate entity identifiers that exceed the configured length limit."""
 
@@ -492,7 +492,7 @@ def _truncate_entity_identifier(
     preview = identifier[:20]  # Show first 20 characters as preview
     logger.warning(
         "%s: %s len %d > %d chars (Name: '%s...')",
-        chunk_key,
+        document_key,
         identifier_role,
         len(identifier),
         limit,
@@ -503,14 +503,14 @@ def _truncate_entity_identifier(
 
 def _handle_single_entity_extraction(
     record_attributes: list[str],
-    chunk_key: str,
+    document_key: str,
     timestamp: int,
     file_path: str = "unknown_source",
 ):
     if len(record_attributes) != 4 or "entity" not in record_attributes[0]:
         if len(record_attributes) > 1 and "entity" in record_attributes[0]:
             logger.warning(
-                f"{chunk_key}: LLM output format error; found {len(record_attributes)}/4 feilds on ENTITY `{record_attributes[1]}` @ `{record_attributes[2] if len(record_attributes) > 2 else 'N/A'}`"
+                f"{document_key}: LLM output format error; found {len(record_attributes)}/4 feilds on ENTITY `{record_attributes[1]}` @ `{record_attributes[2] if len(record_attributes) > 2 else 'N/A'}`"
             )
             logger.debug(record_attributes)
         return None
@@ -571,33 +571,33 @@ def _handle_single_entity_extraction(
             entity_name=entity_name,
             entity_type=entity_type,
             description=entity_description,
-            source_id=chunk_key,
+            source_id=document_key,
             file_path=file_path,
             timestamp=timestamp,
         )
 
     except ValueError as e:
         logger.error(
-            f"Entity extraction failed due to encoding issues in chunk {chunk_key}: {e}"
+            f"Entity extraction failed due to encoding issues in document {document_key}: {e}"
         )
         return None
     except Exception as e:
         logger.error(
-            f"Entity extraction failed with unexpected error in chunk {chunk_key}: {e}"
+            f"Entity extraction failed with unexpected error in document {document_key}: {e}"
         )
         return None
 
 
 def _handle_single_relationship_extraction(
     record_attributes: list[str],
-    chunk_key: str,
+    document_key: str,
     timestamp: int,
     file_path: str = "unknown_source",
 ):
     if len(record_attributes) != 5 or "relation" not in record_attributes[0]:
         if len(record_attributes) > 1 and "relation" in record_attributes[0]:
             logger.warning(
-                f"{chunk_key}: LLM output format error; found {len(record_attributes)}/5 fields on REALTION `{record_attributes[1]}`~`{record_attributes[2] if len(record_attributes) > 2 else 'N/A'}`"
+                f"{document_key}: LLM output format error; found {len(record_attributes)}/5 fields on REALTION `{record_attributes[1]}`~`{record_attributes[2] if len(record_attributes) > 2 else 'N/A'}`"
             )
             logger.debug(record_attributes)
         return None
@@ -639,11 +639,11 @@ def _handle_single_relationship_extraction(
         edge_description = sanitize_and_normalize_extracted_text(record_attributes[4])
         if not edge_description.strip():
             logger.warning(
-                f"Relationship extraction error: empty description for relation '{source}'~'{target}' in chunk '{chunk_key}'"
+                f"Relationship extraction error: empty description for relation '{source}'~'{target}' in document '{document_key}'"
             )
             return None
 
-        edge_source_id = chunk_key
+        edge_source_id = document_key
         weight = (
             float(record_attributes[-1].strip('"').strip("'"))
             if is_float_regex(record_attributes[-1].strip('"').strip("'"))
@@ -663,19 +663,19 @@ def _handle_single_relationship_extraction(
 
     except ValueError as e:
         logger.warning(
-            f"Relationship extraction failed due to encoding issues in chunk {chunk_key}: {e}"
+            f"Relationship extraction failed due to encoding issues in document {document_key}: {e}"
         )
         return None
     except Exception as e:
         logger.warning(
-            f"Relationship extraction failed with unexpected error in chunk {chunk_key}: {e}"
+            f"Relationship extraction failed with unexpected error in document {document_key}: {e}"
         )
         return None
 
 
 def _process_extraction_result(
     result: str,
-    chunk_key: str,
+    document_key: str,
     timestamp: int,
     file_path: str = "unknown_source",
     tuple_delimiter: str = "<|#|>",
@@ -687,7 +687,7 @@ def _process_extraction_result(
 
     if completion_delimiter not in result:
         logger.warning(
-            f"{chunk_key}: Complete delimiter can not be found in extraction result"
+            f"{document_key}: Complete delimiter can not be found in extraction result"
         )
 
     # Split LLL output result to records by "\n"
@@ -729,7 +729,7 @@ def _process_extraction_result(
 
     if len(fixed_records) != len(records):
         logger.warning(
-            f"{chunk_key}: LLM output format error; find LLM use {tuple_delimiter} as record separators instead new-line"
+            f"{document_key}: LLM output format error; find LLM use {tuple_delimiter} as record separators instead new-line"
         )
 
     for record in fixed_records:
@@ -751,13 +751,13 @@ def _process_extraction_result(
 
         # Try to parse as entity
         entity_data = _handle_single_entity_extraction(
-            record_attributes, chunk_key, timestamp, file_path
+            record_attributes, document_key, timestamp, file_path
         )
         if entity_data is not None:
             truncated_name = _truncate_entity_identifier(
                 entity_data["entity_name"],
                 DEFAULT_ENTITY_NAME_MAX_LENGTH,
-                chunk_key,
+                document_key,
                 "Entity name",
             )
             entity_data["entity_name"] = truncated_name
@@ -766,19 +766,19 @@ def _process_extraction_result(
 
         # Try to parse as relationship
         relationship_data = _handle_single_relationship_extraction(
-            record_attributes, chunk_key, timestamp, file_path
+            record_attributes, document_key, timestamp, file_path
         )
         if relationship_data is not None:
             truncated_source = _truncate_entity_identifier(
                 relationship_data["src_id"],
                 DEFAULT_ENTITY_NAME_MAX_LENGTH,
-                chunk_key,
+                document_key,
                 "Relation entity",
             )
             truncated_target = _truncate_entity_identifier(
                 relationship_data["tgt_id"],
                 DEFAULT_ENTITY_NAME_MAX_LENGTH,
-                chunk_key,
+                document_key,
                 "Relation entity",
             )
             relationship_data["src_id"] = truncated_source
@@ -789,7 +789,7 @@ def _process_extraction_result(
 
 
 def extract_entities(
-    chunks: dict[str, TextChunkSchema],
+    documents: dict[str, DocumentSchema],
     global_config: dict[str, str],
     pipeline_status: dict = None,
     pipeline_status_lock=None,
@@ -805,7 +805,7 @@ def extract_entities(
     use_llm_func: callable = global_config["llm_model_func"]
     entity_extract_max_gleaning = global_config["entity_extract_max_gleaning"]
 
-    ordered_chunks = list(chunks.items())
+    ordered_documents = list(documents.items())
     # add language and example number params to prompt
     language = global_config["addon_params"].get("language", DEFAULT_SUMMARY_LANGUAGE)
     entity_types = global_config["addon_params"].get(
@@ -831,30 +831,30 @@ def extract_entities(
         language=language,
     )
 
-    processed_chunks = 0
-    total_chunks = len(ordered_chunks)
+    processed_documents = 0
+    total_documents = len(ordered_documents)
 
-    def _process_single_content(chunk_key_dp: tuple[str, TextChunkSchema]):
-        """Process a single chunk
+    def _process_single_content(document_key_dp: tuple[str, DocumentSchema]):
+        """Process a single document
         Args:
-            chunk_key_dp (tuple[str, TextChunkSchema]):
-                ("chunk-xxxxxx", {"tokens": int, "content": str, "full_doc_id": str, "chunk_order_index": int})
+            document_key_dp (tuple[str, DocumentSchema]):
+                ("document-xxxxxx", {"tokens": int, "content": str, "full_doc_id": str, "chunk_order_index": int})
         Returns:
             tuple: (maybe_nodes, maybe_edges) containing extracted entities and relationships
         """
-        nonlocal processed_chunks
-        chunk_key = chunk_key_dp[0]
-        chunk_dp = chunk_key_dp[1]
-        content = chunk_dp["content"]
-        # Get file path from chunk data or use default
-        file_path = chunk_dp.get("file_path", "unknown_source")
+        nonlocal processed_documents
+        document_key = document_key_dp[0]
+        document_dp = document_key_dp[1]
+        content = document_dp["content"]
+        # Get file path from document data or use default
+        file_path = document_dp.get("file_path", "unknown_source")
 
         # Get initial extraction
-        # Format system prompt without input_text for each chunk (enables OpenAI prompt caching across chunks)
+        # Format system prompt without input_text for each document (enables OpenAI prompt caching across documents)
         entity_extraction_system_prompt = PROMPTS[
             "entity_extraction_system_prompt"
         ].format(**context_base)
-        # Format user prompts with input_text for each chunk
+        # Format user prompts with input_text for each document
         entity_extraction_user_prompt = PROMPTS["entity_extraction_user_prompt"].format(
             **{**context_base, "input_text": content}
         )
@@ -876,7 +876,7 @@ def extract_entities(
         # Process initial extraction with file path
         maybe_nodes, maybe_edges = _process_extraction_result(
             final_result,
-            chunk_key,
+            document_key,
             timestamp,
             file_path,
             tuple_delimiter=context_base["tuple_delimiter"],
@@ -902,7 +902,7 @@ def extract_entities(
 
             if token_count > max_input_tokens:
                 logger.warning(
-                    f"Gleaning stopped for chunk {chunk_key}: Input tokens ({token_count}) exceeded limit ({max_input_tokens})."
+                    f"Gleaning stopped for document {document_key}: Input tokens ({token_count}) exceeded limit ({max_input_tokens})."
                 )
             else:
                 glean_result = use_llm_func(
@@ -916,7 +916,7 @@ def extract_entities(
                 # Process gleaning result separately with file path
                 glean_nodes, glean_edges = _process_extraction_result(
                     glean_result,
-                    chunk_key,
+                    document_key,
                     timestamp,
                     file_path,
                     tuple_delimiter=context_base["tuple_delimiter"],
@@ -958,10 +958,13 @@ def extract_entities(
                         # New edge from gleaning stage
                         maybe_edges[edge_key] = list(glean_edge_list)
 
-        processed_chunks += 1
+        processed_documents += 1
         entities_count = len(maybe_nodes)
         relations_count = len(maybe_edges)
-        log_message = f"Chunk {processed_chunks} of {total_chunks} extracted {entities_count} Ent + {relations_count} Rel {chunk_key}"
+        log_message = (
+            f"Document {processed_documents} of {total_documents} extracted "
+            f"{entities_count} Ent + {relations_count} Rel {document_key}"
+        )
         logger.info(log_message)
         if pipeline_status is not None:
             with pipeline_status_lock:
@@ -971,25 +974,25 @@ def extract_entities(
         # Return the extracted nodes and edges for centralized processing
         return maybe_nodes, maybe_edges
 
-    # Process chunks sequentially (synchronous processing)
-    chunk_results = []
+    # Process documents sequentially (synchronous processing)
+    document_results = []
     first_exception = None
 
-    for chunk in ordered_chunks:
-        # Check for cancellation before processing chunk
+    for document in ordered_documents:
+        # Check for cancellation before processing document
         if pipeline_status is not None and pipeline_status_lock is not None:
             with pipeline_status_lock:
                 if pipeline_status.get("cancellation_requested", False):
                     raise PipelineCancelledException(
-                        "User cancelled during chunk processing"
+                        "User cancelled during document processing"
                     )
 
         try:
-            result = _process_single_content(chunk)
-            chunk_results.append(result)
+            result = _process_single_content(document)
+            document_results.append(result)
         except Exception as e:
-            chunk_id = chunk[0]  # Extract chunk_id from chunk[0]
-            prefixed_exception = create_prefixed_exception(e, chunk_id)
+            document_id = document[0]  # Extract document_id from document[0]
+            prefixed_exception = create_prefixed_exception(e, document_id)
             if first_exception is None:
                 first_exception = prefixed_exception
             # Stop processing on first exception
@@ -997,10 +1000,10 @@ def extract_entities(
 
     # If any task failed, raise the first exception with progress prefix
     if first_exception is not None:
-        progress_prefix = f"C[{processed_chunks + 1}/{total_chunks}]"
+        progress_prefix = f"D[{processed_documents + 1}/{total_documents}]"
         final_exception = create_prefixed_exception(first_exception, progress_prefix)
         raise final_exception from first_exception
 
-    # If all tasks completed successfully, chunk_results already contains the results
-    # Return the chunk_results for later processing in merge_nodes_and_edges
-    return chunk_results
+    # If all tasks completed successfully, document_results already contains the results
+    # Return the document_results for later processing in merge_nodes_and_edges
+    return document_results

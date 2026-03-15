@@ -48,7 +48,7 @@ class Command(BaseCommand):
                     self.stdout.write(self.style.SUCCESS("Documents in the system:"))
                     self.stdout.write("-" * 100)
                     self.stdout.write(
-                        f"{'ID':<36} {'Title':<30} {'Status':<12} {'Chunks':<8} {'Created':<20}"
+                        f"{'ID':<36} {'Title':<30} {'Status':<12} {'Documents':<9} {'Created':<20}"
                     )
                     self.stdout.write("-" * 100)
 
@@ -62,7 +62,7 @@ class Command(BaseCommand):
 
                         self.stdout.write(
                             f"{doc['id']:<36} {title:<30} {doc['status']:<12} "
-                            f"{doc['chunks_count']:<8} {created:<20}"
+                            f"{doc['documents_count']:<8} {created:<20}"
                         )
 
                     self.stdout.write("-" * 100)

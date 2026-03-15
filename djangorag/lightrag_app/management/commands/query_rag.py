@@ -95,7 +95,7 @@ class Command(BaseCommand):
                     self.stdout.write("=" * 50)
                     self.stdout.write("Context Summary:")
                     context = result.context
-                    self.stdout.write(f"Chunks: {len(context.get('chunks', []))}")
+                    self.stdout.write(f"Documents: {len(context.get('documents', []))}")
                     self.stdout.write(f"Entities: {len(context.get('entities', []))}")
                     self.stdout.write(f"Relations: {len(context.get('relations', []))}")
                     self.stdout.write(

@@ -18,7 +18,7 @@ class DocumentSchema(Schema):
     id: str
     title: str
     status: str
-    chunks_count: int
+    documents_count: int
     created_at: str
     updated_at: str
 
@@ -27,8 +27,8 @@ class DocumentStatusSchema(Schema):
     document_id: str
     title: str
     status: str
-    chunks_count: int
-    chunks_list: List[str]
+    documents_count: int
+    documents_list: List[str]
     error_message: str
     started_at: Optional[str]
     completed_at: Optional[str]
@@ -56,7 +56,6 @@ class SourceSchema(Schema):
     content: Optional[str] = None
     document_id: Optional[str] = None
     document_title: Optional[str] = None
-    chunk_order_index: Optional[int] = None
     entity_type: Optional[str] = None
     description: Optional[str] = None
     source: Optional[str] = None
@@ -93,17 +92,6 @@ class RelationSchema(Schema):
     source_ids: List[str]
     file_paths: List[str]
     weight: float
-    metadata: Dict[str, Any]
-    created_at: str
-    updated_at: str
-
-
-class ChunkSchema(Schema):
-    id: str
-    document_id: str
-    content: str
-    tokens: int
-    chunk_order_index: int
     metadata: Dict[str, Any]
     created_at: str
     updated_at: str
