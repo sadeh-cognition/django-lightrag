@@ -15,7 +15,6 @@ class DocumentModelTest(TestCase):
             id="test-doc-123",
             title="Test Document",
             content="This is a test document content.",
-            file_path="/path/to/test.txt",
             track_id="track-123",
         )
 
@@ -24,7 +23,6 @@ class DocumentModelTest(TestCase):
         self.assertEqual(self.document.id, "test-doc-123")
         self.assertEqual(self.document.title, "Test Document")
         self.assertEqual(self.document.content, "This is a test document content.")
-        self.assertEqual(self.document.file_path, "/path/to/test.txt")
         self.assertEqual(self.document.track_id, "track-123")
         self.assertIsNotNone(self.document.created_at)
         self.assertIsNotNone(self.document.updated_at)
@@ -98,7 +96,6 @@ class EntityModelTest(TestCase):
             entity_type="PERSON",
             description="A test person entity",
             source_ids=["doc1", "doc2"],
-            file_paths=["/path/to/file1.txt", "/path/to/file2.txt"],
         )
 
     def test_entity_creation(self):
@@ -108,9 +105,6 @@ class EntityModelTest(TestCase):
         self.assertEqual(self.entity.entity_type, "PERSON")
         self.assertEqual(self.entity.description, "A test person entity")
         self.assertEqual(self.entity.source_ids, ["doc1", "doc2"])
-        self.assertEqual(
-            self.entity.file_paths, ["/path/to/file1.txt", "/path/to/file2.txt"]
-        )
 
     def test_entity_str_representation(self):
         """Test entity string representation"""
@@ -142,7 +136,6 @@ class RelationModelTest(TestCase):
             relation_type="WORKS_FOR",
             description="Source works for target",
             source_ids=["doc1"],
-            file_paths=["/path/to/file1.txt"],
             weight=1.5,
         )
 
@@ -154,7 +147,6 @@ class RelationModelTest(TestCase):
         self.assertEqual(self.relation.relation_type, "WORKS_FOR")
         self.assertEqual(self.relation.description, "Source works for target")
         self.assertEqual(self.relation.source_ids, ["doc1"])
-        self.assertEqual(self.relation.file_paths, ["/path/to/file1.txt"])
         self.assertEqual(self.relation.weight, 1.5)
 
     def test_relation_str_representation(self):

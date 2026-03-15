@@ -9,7 +9,6 @@ class Document(models.Model):
     id = models.CharField(max_length=255, primary_key=True)  # MD5 hash or UUID
     title = models.CharField(max_length=500, blank=True)
     content = models.TextField()
-    file_path = models.CharField(max_length=1000, blank=True)
     metadata = models.JSONField(default=dict, blank=True)
     track_id = models.CharField(max_length=100, blank=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -65,7 +64,6 @@ class Entity(models.Model):
     entity_type = models.CharField(max_length=100)
     description = models.TextField(blank=True)
     source_ids = models.JSONField(default=list, blank=True)  # List of document IDs
-    file_paths = models.JSONField(default=list, blank=True)
     metadata = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -94,7 +92,6 @@ class Relation(models.Model):
     relation_type = models.CharField(max_length=100)
     description = models.TextField(blank=True)
     source_ids = models.JSONField(default=list, blank=True)  # List of document IDs
-    file_paths = models.JSONField(default=list, blank=True)
     weight = models.FloatField(default=1.0)
     metadata = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

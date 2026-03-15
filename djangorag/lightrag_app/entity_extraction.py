@@ -21,7 +21,6 @@ class DocumentSchema(TypedDict, total=False):
     content: str
     full_doc_id: str
     chunk_order_index: int
-    file_path: str
 
 
 class BaseKVStorage(Protocol):
@@ -505,7 +504,6 @@ def _handle_single_entity_extraction(
     record_attributes: list[str],
     document_key: str,
     timestamp: int,
-    file_path: str = "unknown_source",
 ):
     if len(record_attributes) != 4 or "entity" not in record_attributes[0]:
         if len(record_attributes) > 1 and "entity" in record_attributes[0]:
@@ -572,7 +570,6 @@ def _handle_single_entity_extraction(
             entity_type=entity_type,
             description=entity_description,
             source_id=document_key,
-            file_path=file_path,
             timestamp=timestamp,
         )
 
@@ -592,7 +589,6 @@ def _handle_single_relationship_extraction(
     record_attributes: list[str],
     document_key: str,
     timestamp: int,
-    file_path: str = "unknown_source",
 ):
     if len(record_attributes) != 5 or "relation" not in record_attributes[0]:
         if len(record_attributes) > 1 and "relation" in record_attributes[0]:
@@ -657,7 +653,6 @@ def _handle_single_relationship_extraction(
             description=edge_description,
             keywords=edge_keywords,
             source_id=edge_source_id,
-            file_path=file_path,
             timestamp=timestamp,
         )
 
@@ -677,7 +672,6 @@ def _process_extraction_result(
     result: str,
     document_key: str,
     timestamp: int,
-    file_path: str = "unknown_source",
     tuple_delimiter: str = "<|#|>",
     completion_delimiter: str = "<|COMPLETE|>",
 ) -> tuple[dict, dict]:
@@ -751,7 +745,7 @@ def _process_extraction_result(
 
         # Try to parse as entity
         entity_data = _handle_single_entity_extraction(
-            record_attributes, document_key, timestamp, file_path
+            record_attributes, document_key, timestamp
         )
         if entity_data is not None:
             truncated_name = _truncate_entity_identifier(
@@ -766,7 +760,7 @@ def _process_extraction_result(
 
         # Try to parse as relationship
         relationship_data = _handle_single_relationship_extraction(
-            record_attributes, document_key, timestamp, file_path
+            record_attributes, document_key, timestamp
         )
         if relationship_data is not None:
             truncated_source = _truncate_entity_identifier(
@@ -846,8 +840,6 @@ def extract_entities(
         document_key = document_key_dp[0]
         document_dp = document_key_dp[1]
         content = document_dp["content"]
-        # Get file path from document data or use default
-        file_path = document_dp.get("file_path", "unknown_source")
 
         # Get initial extraction
         # Format system prompt without input_text for each document (enables OpenAI prompt caching across documents)
@@ -878,7 +870,6 @@ def extract_entities(
             final_result,
             document_key,
             timestamp,
-            file_path,
             tuple_delimiter=context_base["tuple_delimiter"],
             completion_delimiter=context_base["completion_delimiter"],
         )
@@ -918,7 +909,6 @@ def extract_entities(
                     glean_result,
                     document_key,
                     timestamp,
-                    file_path,
                     tuple_delimiter=context_base["tuple_delimiter"],
                     completion_delimiter=context_base["completion_delimiter"],
                 )

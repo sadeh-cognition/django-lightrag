@@ -1,6 +1,5 @@
 import hashlib
 import json
-import os
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 from dataclasses import dataclass
@@ -89,7 +88,6 @@ class LightRAGCore:
         self,
         content: str,
         title: str = "",
-        file_path: str = "",
         metadata: Dict[str, Any] = None,
         track_id: str = "",
     ) -> str:
@@ -102,7 +100,6 @@ class LightRAGCore:
             id=document_id,
             title=title,
             content=content,
-            file_path=file_path,
             metadata=metadata,
             track_id=track_id,
         )
@@ -152,7 +149,6 @@ class LightRAGCore:
                     "entity_type": entity_data["entity_type"],
                     "description": entity_data.get("description", ""),
                     "source_ids": [document.id],
-                    "file_paths": [document.file_path] if document.file_path else [],
                     "metadata": entity_data.get("metadata", {}),
                 },
             )
@@ -162,9 +158,6 @@ class LightRAGCore:
                 updated = False
                 if document.id not in entity.source_ids:
                     entity.source_ids.append(document.id)
-                    updated = True
-                if document.file_path and document.file_path not in entity.file_paths:
-                    entity.file_paths.append(document.file_path)
                     updated = True
                 if updated:
                     entity.save()
@@ -197,7 +190,6 @@ class LightRAGCore:
                     "relation_type": relation_data["relation_type"],
                     "description": relation_data.get("description", ""),
                     "source_ids": [document.id],
-                    "file_paths": [document.file_path] if document.file_path else [],
                     "metadata": relation_data.get("metadata", {}),
                 },
             )
@@ -207,9 +199,6 @@ class LightRAGCore:
                 updated = False
                 if document.id not in relation.source_ids:
                     relation.source_ids.append(document.id)
-                    updated = True
-                if document.file_path and document.file_path not in relation.file_paths:
-                    relation.file_paths.append(document.file_path)
                     updated = True
                 if updated:
                     relation.save()

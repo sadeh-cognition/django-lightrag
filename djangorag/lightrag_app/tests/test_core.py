@@ -89,7 +89,6 @@ class LightRAGCoreTest(TestCase):
         document_id = self.core.ingest_document(
             content=content,
             title=title,
-            file_path="/test/path.txt",
             track_id="test-track-123",
         )
 

@@ -3,8 +3,7 @@ Django API views for LightRAG using django-ninja.
 """
 
 from typing import List, Dict, Optional
-from ninja import Router, File, Form
-from ninja.files import UploadedFile
+from ninja import Router
 
 from .core import LightRAGCore, QueryParam
 from .schemas import (
@@ -33,7 +32,6 @@ def ingest_document(request, data: DocumentIngestSchema):
             document_id = core.ingest_document(
                 content=data.content,
                 title=data.title,
-                file_path=data.file_path,
                 metadata=data.metadata,
                 track_id=data.track_id,
             )
@@ -43,53 +41,6 @@ def ingest_document(request, data: DocumentIngestSchema):
             }
         finally:
             core.close()
-    except Exception as e:
-        return 400, {"error": "ingestion_failed", "message": str(e)}
-
-
-@router.post(
-    "/documents/ingest-file", response={201: Dict[str, str], 400: ErrorResponseSchema}
-)
-def ingest_document_file(
-    request,
-    file: UploadedFile = File(...),
-    title: str = Form(""),
-    track_id: str = Form(""),
-    metadata: str = Form("{}"),
-):
-    """Ingest a file into the system"""
-    try:
-        # Read file content
-        content = file.read().decode("utf-8")
-
-        # Parse metadata
-        try:
-            import json
-
-            metadata_dict = json.loads(metadata) if metadata else {}
-        except json.JSONDecodeError:
-            metadata_dict = {}
-
-        # Use filename as title if not provided
-        if not title:
-            title = file.name
-
-        core = LightRAGCore()
-        try:
-            document_id = core.ingest_document(
-                content=content,
-                title=title,
-                file_path=file.name,
-                metadata=metadata_dict,
-                track_id=track_id,
-            )
-            return 201, {
-                "document_id": document_id,
-                "message": "File ingested successfully",
-            }
-        finally:
-            core.close()
-
     except Exception as e:
         return 400, {"error": "ingestion_failed", "message": str(e)}
 

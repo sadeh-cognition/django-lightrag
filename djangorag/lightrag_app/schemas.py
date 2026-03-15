@@ -9,7 +9,6 @@ from ninja import Schema
 class DocumentIngestSchema(Schema):
     content: str
     title: str = ""
-    file_path: str = ""
     track_id: str = ""
     metadata: Dict[str, Any] = {}
 
@@ -77,7 +76,6 @@ class EntitySchema(Schema):
     entity_type: str
     description: str
     source_ids: List[str]
-    file_paths: List[str]
     metadata: Dict[str, Any]
     created_at: str
     updated_at: str
@@ -90,7 +88,6 @@ class RelationSchema(Schema):
     relation_type: str
     description: str
     source_ids: List[str]
-    file_paths: List[str]
     weight: float
     metadata: Dict[str, Any]
     created_at: str
