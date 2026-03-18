@@ -1,0 +1,11 @@
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-format-stage
+        name: ruff-format-and-stage
+        entry: ./scripts/ruff-format-stage.sh
+        language: script
+        files: ^.*\.py$
+        stages: [pre-commit]
+        always_run: false
+        description: Run ruff formatter on Python files and stage changes

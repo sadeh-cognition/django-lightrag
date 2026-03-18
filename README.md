@@ -127,6 +127,30 @@ python manage.py list_documents --format table
 python manage.py query_rag "What is LightRAG?" --mode hybrid --top-k 5 --include-sources
 ```
 
+## Pre-commit Hooks
+This project uses pre-commit hooks to ensure code quality. The hooks automatically run ruff formatter on Python files before commits and stage the formatted files.
+
+### Setup
+```bash
+# Install pre-commit (if not already installed)
+uv tool install pre-commit
+
+# Install the hooks
+uvx pre-commit install
+```
+
+### Available Hooks
+- **ruff-format-and-stage**: Runs ruff formatter on staged Python files and automatically stages the formatted files.
+
+### Manual Testing
+```bash
+# Run hooks on all files
+uvx pre-commit run --all-files
+
+# Run hooks only on staged files
+uvx pre-commit run
+```
+
 ## Troubleshooting
 - If `chromadb` is not installed, install it or set `CHROMADB_IN_MEMORY=True` and ensure a compatible ChromaDB version.
 - If `real_ladybug` is missing, install `real-ladybug` and verify LadybugDB can create its file.
