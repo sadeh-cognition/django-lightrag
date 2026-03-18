@@ -6,6 +6,8 @@ repos:
         entry: ./scripts/ruff-format-stage.sh
         language: script
         files: ^.*\.py$
+        pass_filenames: true
+        require_serial: true
         stages: [pre-commit]
         always_run: false
         description: Run ruff formatter on Python files and stage changes
