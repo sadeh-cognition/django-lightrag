@@ -21,10 +21,24 @@ class Command(BaseCommand):
         output_format = options["format"]
 
         # Get documents
-        from django_lightrag.core import LightRAGCore
+        from .core import LightRAGCore
+        from django.conf import settings
+
+        config = getattr(settings, "LIGHTRAG", {})
+        embedding_model = config.get(
+            "EMBEDDING_MODEL", "text-embedding-embeddinggemma-300m"
+        )
+        embedding_provider = config.get("EMBEDDING_PROVIDER", "LMStudio")
+        embedding_base_url = config.get("EMBEDDING_BASE_URL", "http://localhost:1234")
+        llm_model = config.get("LLM_MODEL", "gpt-4o-mini")
 
         try:
-            core = LightRAGCore()
+            core = LightRAGCore(
+                embedding_model=embedding_model,
+                embedding_provider=embedding_provider,
+                embedding_base_url=embedding_base_url,
+                llm_model=llm_model,
+            )
             try:
                 documents = core.list_documents()
 

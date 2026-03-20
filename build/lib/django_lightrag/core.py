@@ -2,7 +2,7 @@ import hashlib
 import json
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Dict, List, Tuple
 
 import tiktoken
 from django.conf import settings
@@ -70,7 +70,7 @@ class Tokenizer:
 class LightRAGCore:
     """Core LightRAG functionality integrated with Django"""
 
-    def __init__(self):
+    def __init__(self, llm_model: str = "", llm_temperature: float | None = None):
         self.tokenizer = Tokenizer()
         self.graph_storage = LadybugGraphStorage()
         self.vector_storage = ChromaVectorStorage()
@@ -91,8 +91,12 @@ class LightRAGCore:
         self.embedding_base_url = self.config.get(
             "EMBEDDING_BASE_URL", "http://localhost:1234"
         )
-        self.llm_model = self.config.get("LLM_MODEL", "gpt-4o-mini")
-        self.llm_temperature = self.config.get("LLM_TEMPERATURE", 0.0)
+        self.llm_model = llm_model or self.config.get("LLM_MODEL", "gpt-4o-mini")
+        self.llm_temperature = (
+            llm_temperature
+            if llm_temperature is not None
+            else self.config.get("LLM_TEMPERATURE", 0.0)
+        )
         self.entity_extract_max_gleaning = self.config.get(
             "ENTITY_EXTRACT_MAX_GLEANING", 1
         )
@@ -103,7 +107,6 @@ class LightRAGCore:
             "EXTRACTION_LANGUAGE", DEFAULT_SUMMARY_LANGUAGE
         )
         self.entity_types = self.config.get("ENTITY_TYPES", DEFAULT_ENTITY_TYPES)
-        self._llm_model_func = None
 
     def _generate_id(self, content: str) -> str:
         """Generate a consistent ID from content"""
@@ -148,7 +151,20 @@ class LightRAGCore:
         entity_objects = self._persist_entities(document, extracted_entities)
         self._persist_relations(document, extracted_relations, entity_objects)
 
-    def _build_llm_model_func(self):
+    def _call_llm(
+        self,
+        user_prompt: str,
+        _llm_model_func: Any,
+        system_prompt: str | None = None,
+        history_messages: List[Dict[str, str]] | None = None,
+        max_tokens: int | None = None,
+    ) -> str:
+        """
+        Adapter callable for `extract_entities`.
+
+        `extract_entities` passes a second positional arg containing the llm func;
+        we accept and ignore it for compatibility.
+        """
         try:
             from django_llm_chat.chat import Chat, DuplicateSystemMessageError
             from django_llm_chat.models import Message
@@ -158,50 +174,42 @@ class LightRAGCore:
                 "enable LLM extraction."
             ) from exc
 
-        def _call_llm(
-            user_prompt: str,
-            system_prompt: str | None = None,
-            history_messages: List[Dict[str, str]] | None = None,
-            max_tokens: int | None = None,
-        ) -> str:
-            chat = Chat.create()
+        chat = Chat.create()
 
-            if system_prompt:
-                try:
-                    chat.create_system_message(system_prompt)
-                except DuplicateSystemMessageError:
-                    pass
+        if system_prompt:
+            try:
+                chat.create_system_message(system_prompt)
+            except DuplicateSystemMessageError:
+                pass
 
-            if history_messages:
-                for msg in history_messages:
-                    role = (msg.get("role") or msg.get("type") or "user").lower()
-                    content = msg.get("content", "")
-                    if not content:
+        if history_messages:
+            for msg in history_messages:
+                role = (msg.get("role") or msg.get("type") or "user").lower()
+                content = msg.get("content", "")
+                if not content:
+                    continue
+                if role == "system":
+                    try:
+                        chat.create_system_message(content)
+                    except DuplicateSystemMessageError:
                         continue
-                    if role == "system":
-                        try:
-                            chat.create_system_message(content)
-                        except DuplicateSystemMessageError:
-                            continue
-                    elif role == "assistant":
-                        Message.create_llm_message(
-                            chat=chat.chat_db_model,
-                            text=content,
-                            user=chat.llm_user,
-                        )
-                    else:
-                        chat.create_user_message(content)
+                elif role == "assistant":
+                    Message.create_llm_message(
+                        chat=chat.chat_db_model,
+                        text=content,
+                        user=chat.llm_user,
+                    )
+                else:
+                    chat.create_user_message(content)
 
-            llm_msg, _, _ = chat.send_user_msg_to_llm(
-                self.llm_model,
-                user_prompt,
-                include_chat_history=True,
-                temperature=self.llm_temperature,
-                max_tokens=max_tokens,
-            )
-            return llm_msg.text or ""
-
-        return _call_llm
+        llm_msg, _, _ = chat.send_user_msg_to_llm(
+            self.llm_model,
+            user_prompt,
+            include_chat_history=True,
+            temperature=self.llm_temperature,
+            max_tokens=max_tokens,
+        )
+        return llm_msg.text or ""
 
     def _relation_type_from_keywords(self, keywords: str) -> str:
         if not keywords:
@@ -212,9 +220,6 @@ class LightRAGCore:
     def _llm_extract_entities_relations(
         self, document: Document
     ) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
-        if self._llm_model_func is None:
-            self._llm_model_func = self._build_llm_model_func()
-
         document_payload = {
             document.id: {
                 "tokens": self.tokenizer.count_tokens(document.content),
@@ -225,7 +230,7 @@ class LightRAGCore:
         }
 
         global_config = {
-            "llm_model_func": self._llm_model_func,
+            "llm_model_func": self._call_llm,
             "entity_extract_max_gleaning": self.entity_extract_max_gleaning,
             "addon_params": {
                 "language": self.extraction_language,
