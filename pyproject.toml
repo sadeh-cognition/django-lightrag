@@ -33,12 +33,12 @@ dependencies = [
     "real-ladybug>=0.1.0",
     "chromadb>=0.4.0",
     "tiktoken>=0.5.0",
-    "django-llm-chat",
     "python-dotenv>=1.0.0",
     "aiofiles>=23.0.0",
     "numpy>=1.24.0",
     "asyncio-throttle>=1.0.2",
     "pytest-django>=4.11.1",
+    "django-llm-chat",
 ]
 
 [project.optional-dependencies]
@@ -71,6 +71,9 @@ target-version = "py313"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "A", "C4", "DJ", "PIE", "PT", "RSE"]
 ignore = ["E501", "PIE796"]
+
+[tool.uv.sources]
+django-llm-chat = { path = "../llm_chat", editable = true }
 
 [dependency-groups]
 dev = [
