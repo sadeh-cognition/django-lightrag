@@ -1,9 +1,8 @@
-import json
-import time
-from typing import Any, Dict, List, Tuple
+from typing import Any
+
+from .llm import LLMService
 from .models import Document, Entity, Relation
 from .storage import ChromaVectorStorage
-from .llm import LLMService
 from .types import QueryParam, QueryResult
 
 
@@ -22,30 +21,11 @@ class QueryEngine:
 
     def query(self, query_text: str, param: QueryParam) -> QueryResult:
         """Query the RAG system"""
-        start_time = time.time()
-
-        # Generate query embedding (this might need to be passed in or handled by a separate service if we want to be super clean)
-        # For now, let's assume we can get it or the caller provides it.
-        # However, to keep it simple and consistent with core.py, we'll keep the retrieval logic here.
-        # Actually core.py does the embedding generation.
-
-        # We'll need a way to get embeddings. Let's assume the caller provides the embedding for now,
-        # or we pass the embedding function to the engine.
-
-        # To match the original implementation's flow:
-        # 1. Get embedding (handled by core for now, but engine needs it)
-        # 2. Retrieve docs
-        # 3. Retrieve graph
-        # 4. Build context
-        # 5. Generate response
-
-        # I'll update the signature to accept the query_embedding if it's cleaner,
-        # but let's stick to what core.py expects: core calls retrieve_documents etc.
-        pass
+        raise NotImplementedError("Use LightRAGCore.query() instead.")
 
     def retrieve_documents(
-        self, query_embedding: List[float], top_k: int
-    ) -> List[Document]:
+        self, query_embedding: list[float], top_k: int
+    ) -> list[Document]:
         """Retrieve relevant documents using vector similarity"""
         results = self.vector_storage.search_similar(
             "document", query_embedding, top_k=top_k
@@ -62,22 +42,48 @@ class QueryEngine:
         ]
 
     def retrieve_knowledge_graph(
-        self, query_text: str, top_k: int
-    ) -> Tuple[List[Entity], List[Relation]]:
+        self, query_embedding: list[float], top_k: int
+    ) -> tuple[list[Entity], list[Relation]]:
         """Retrieve relevant entities and relations"""
-        # Placeholder implementation - in practice, use graph traversal or entity matching
-        entities = list(Entity.objects.all()[:top_k])
-        relations = list(Relation.objects.all()[:top_k])
+        entity_results = self.vector_storage.search_similar(
+            "entity", query_embedding, top_k=top_k
+        )
+        relation_results = self.vector_storage.search_similar(
+            "relation", query_embedding, top_k=top_k
+        )
 
+        entity_ids = [item["id"] for item in entity_results]
+        relation_ids = [item["id"] for item in relation_results]
+
+        entities_by_id = {
+            entity.id: entity for entity in Entity.objects.filter(id__in=entity_ids)
+        }
+        relations_by_id = {
+            relation.id: relation
+            for relation in Relation.objects.select_related(
+                "source_entity", "target_entity"
+            ).filter(id__in=relation_ids)
+        }
+
+        entities = [
+            entities_by_id[entity_id]
+            for entity_id in entity_ids
+            if entity_id in entities_by_id
+        ]
+        relations = [
+            relations_by_id[relation_id]
+            for relation_id in relation_ids
+            if relation_id in relations_by_id
+        ]
         return entities, relations
 
     def build_context(
         self,
-        documents: List[Document],
-        entities: List[Entity],
-        relations: List[Relation],
+        documents: list[Document],
+        entities: list[Entity],
+        relations: list[Relation],
         param: QueryParam,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Build context for response generation"""
         context = {"documents": [], "entities": [], "relations": [], "total_tokens": 0}
 
@@ -102,7 +108,8 @@ class QueryEngine:
 
         # Add entities
         for entity in entities:
-            entity_text = f"{entity.name} ({entity.entity_type}): {entity.description}"
+            profile_text = entity.profile_value or entity.description
+            entity_text = f"{entity.name} ({entity.entity_type}): {profile_text}"
             if (
                 context["total_tokens"] + self.tokenizer.count_tokens(entity_text)
                 > param.max_tokens
@@ -113,14 +120,19 @@ class QueryEngine:
                 {
                     "name": entity.name,
                     "entity_type": entity.entity_type,
-                    "description": entity.description,
+                    "description": profile_text,
+                    "profile_key": entity.profile_key,
                 }
             )
             context["total_tokens"] += self.tokenizer.count_tokens(entity_text)
 
         # Add relations
         for relation in relations:
-            relation_text = f"{relation.source_entity.name} -> {relation.relation_type} -> {relation.target_entity.name}"
+            profile_text = relation.profile_value or relation.description
+            relation_text = (
+                f"{relation.source_entity.name} -> {relation.relation_type} -> "
+                f"{relation.target_entity.name}: {profile_text}"
+            )
             if (
                 context["total_tokens"] + self.tokenizer.count_tokens(relation_text)
                 > param.max_tokens
@@ -132,7 +144,8 @@ class QueryEngine:
                     "source": relation.source_entity.name,
                     "relation_type": relation.relation_type,
                     "target": relation.target_entity.name,
-                    "description": relation.description,
+                    "description": profile_text,
+                    "profile_key": relation.profile_key,
                 }
             )
             context["total_tokens"] += self.tokenizer.count_tokens(relation_text)
@@ -140,7 +153,7 @@ class QueryEngine:
         return context
 
     def generate_response(
-        self, query_text: str, context: Dict[str, Any], param: QueryParam
+        self, query_text: str, context: dict[str, Any], param: QueryParam
     ) -> str:
         """Generate response based on context"""
         # Placeholder - in practice, use LLM to generate response
@@ -162,10 +175,10 @@ The actual implementation would use the context to provide a detailed, relevant 
 
     def format_sources(
         self,
-        documents: List[Document],
-        entities: List[Entity],
-        relations: List[Relation],
-    ) -> List[Dict[str, Any]]:
+        documents: list[Document],
+        entities: list[Entity],
+        relations: list[Relation],
+    ) -> list[dict[str, Any]]:
         """Format sources for the response"""
         sources = []
 
@@ -184,6 +197,7 @@ The actual implementation would use the context to provide a detailed, relevant 
             )
 
         for entity in entities:
+            profile_text = entity.profile_value or entity.description
             sources.append(
                 {
                     "type": "entity",
@@ -191,14 +205,15 @@ The actual implementation would use the context to provide a detailed, relevant 
                     "name": entity.name,
                     "entity_type": entity.entity_type,
                     "description": (
-                        entity.description[:200] + "..."
-                        if len(entity.description) > 200
-                        else entity.description
+                        profile_text[:200] + "..."
+                        if len(profile_text) > 200
+                        else profile_text
                     ),
                 }
             )
 
         for relation in relations:
+            profile_text = relation.profile_value or relation.description
             sources.append(
                 {
                     "type": "relation",
@@ -207,9 +222,9 @@ The actual implementation would use the context to provide a detailed, relevant 
                     "relation_type": relation.relation_type,
                     "target": relation.target_entity.name,
                     "description": (
-                        relation.description[:200] + "..."
-                        if len(relation.description) > 200
-                        else relation.description
+                        profile_text[:200] + "..."
+                        if len(profile_text) > 200
+                        else profile_text
                     ),
                 }
             )

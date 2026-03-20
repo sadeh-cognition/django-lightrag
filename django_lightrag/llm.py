@@ -1,6 +1,12 @@
-from typing import Dict, List, Optional
-from django_llm_chat.chat import Chat, DuplicateSystemMessageError
-from django_llm_chat.models import Message
+try:
+    from django_llm_chat.chat import Chat, DuplicateSystemMessageError
+    from django_llm_chat.models import Message
+except ImportError:
+    Chat = None
+    Message = None
+
+    class DuplicateSystemMessageError(Exception):
+        pass
 
 
 class LLMService:
@@ -13,13 +19,18 @@ class LLMService:
     def call_llm(
         self,
         user_prompt: str,
-        system_prompt: Optional[str] = None,
-        history_messages: Optional[List[Dict[str, str]]] = None,
-        max_tokens: Optional[int] = None,
+        system_prompt: str | None = None,
+        history_messages: list[dict[str, str]] | None = None,
+        max_tokens: int | None = None,
     ) -> str:
         """
         Adapter for LLM completion using django-llm-chat.
         """
+        if Chat is None or Message is None:
+            raise RuntimeError(
+                "django-llm-chat is not installed. Install django-llm-chat to use LLMService."
+            )
+
         chat = Chat.create()
 
         if system_prompt:

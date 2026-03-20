@@ -1,5 +1,4 @@
 from django.db import models
-from django.contrib.auth.models import User
 
 
 class Document(models.Model):
@@ -29,6 +28,10 @@ class Entity(models.Model):
     name = models.CharField(max_length=500, db_index=True)
     entity_type = models.CharField(max_length=100)
     description = models.TextField(blank=True)
+    profile_key = models.CharField(max_length=255, blank=True)
+    profile_value = models.TextField(blank=True)
+    profile_input_hash = models.CharField(max_length=64, blank=True)
+    profile_updated_at = models.DateTimeField(null=True, blank=True)
     source_ids = models.JSONField(default=list, blank=True)  # List of document IDs
     metadata = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -57,6 +60,10 @@ class Relation(models.Model):
     )
     relation_type = models.CharField(max_length=100)
     description = models.TextField(blank=True)
+    profile_key = models.CharField(max_length=255, blank=True)
+    profile_value = models.TextField(blank=True)
+    profile_input_hash = models.CharField(max_length=64, blank=True)
+    profile_updated_at = models.DateTimeField(null=True, blank=True)
     source_ids = models.JSONField(default=list, blank=True)  # List of document IDs
     weight = models.FloatField(default=1.0)
     metadata = models.JSONField(default=dict, blank=True)

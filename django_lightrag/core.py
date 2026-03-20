@@ -1,23 +1,23 @@
 import hashlib
 import time
-from typing import Any, Dict, List
+from typing import Any
 
 from django.conf import settings
-from embed_gen.generator import generate_embeddings
 
-from .entity_extraction import (
-    DEFAULT_ENTITY_TYPES,
-    DEFAULT_SUMMARY_LANGUAGE,
-)
-from .models import (
-    Document,
-)
+try:
+    from embed_gen.generator import generate_embeddings
+except ImportError:
+    generate_embeddings = None
+
+from .entity_extraction import DEFAULT_ENTITY_TYPES, DEFAULT_SUMMARY_LANGUAGE
+from .graph_builder import KnowledgeGraphBuilder
+from .llm import LLMService
+from .models import Document, Entity, Relation
+from .profiling import ProfilingService
+from .query_engine import QueryEngine
 from .storage import ChromaVectorStorage, LadybugGraphStorage
 from .types import QueryParam, QueryResult
 from .utils import Tokenizer
-from .llm import LLMService
-from .graph_builder import KnowledgeGraphBuilder
-from .query_engine import QueryEngine
 
 
 class LightRAGCore:
@@ -30,12 +30,17 @@ class LightRAGCore:
         embedding_base_url: str,
         llm_model: str,
         llm_temperature: float | None = None,
+        *,
+        llm_service: LLMService | None = None,
+        graph_storage: LadybugGraphStorage | None = None,
+        vector_storage: ChromaVectorStorage | None = None,
+        tokenizer: Tokenizer | None = None,
     ):
         # Load configuration from settings
         self.config = getattr(settings, "LIGHTRAG", {})
 
-        self.tokenizer = Tokenizer()
-        self.llm_service = LLMService(
+        self.tokenizer = tokenizer or Tokenizer()
+        self.llm_service = llm_service or LLMService(
             model=llm_model,
             temperature=(
                 llm_temperature
@@ -44,8 +49,12 @@ class LightRAGCore:
             ),
         )
 
-        self.graph_storage = LadybugGraphStorage()
-        self.vector_storage = ChromaVectorStorage()
+        self.graph_storage = graph_storage or LadybugGraphStorage()
+        self.vector_storage = vector_storage or ChromaVectorStorage()
+        self.profiling_service = ProfilingService(
+            llm_service=self.llm_service,
+            config={"PROFILE_MAX_TOKENS": self.config.get("PROFILE_MAX_TOKENS", 400)},
+        )
 
         # Initialize specialized components
         self.graph_builder = KnowledgeGraphBuilder(
@@ -104,9 +113,12 @@ class LightRAGCore:
 
         try:
             # 2. Extract KG and persist
-            self.graph_builder.extract_and_persist(document)
+            entities, relations = self.graph_builder.extract_and_persist(document)
 
-            # 3. Generate and store embeddings
+            # 3. Generate entity and relation profiles plus vector entries
+            self._profile_knowledge_graph(entities, relations)
+
+            # 4. Generate and store document embeddings
             self._generate_document_embeddings(document)
 
             return document_id
@@ -129,7 +141,7 @@ class LightRAGCore:
             query_embedding, param.top_k
         )
         relevant_entities, relevant_relations = (
-            self.query_engine.retrieve_knowledge_graph(query_text, param.top_k)
+            self.query_engine.retrieve_knowledge_graph(query_embedding, param.top_k)
         )
 
         # 3. Build context and generate response
@@ -150,12 +162,16 @@ class LightRAGCore:
             tokens_used=self.tokenizer.count_tokens(response),
         )
 
-    def _get_query_embedding(self, query_text: str) -> List[float]:
+    def _get_query_embedding(self, query_text: str) -> list[float]:
         return self._get_embeddings([query_text])[0]
 
-    def _get_embeddings(self, texts: List[str]) -> List[List[float]]:
+    def _get_embeddings(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             raise ValueError("No texts provided for embedding generation.")
+        if generate_embeddings is None:
+            raise RuntimeError(
+                "embed_gen is not installed. Install embed_gen to generate embeddings."
+            )
 
         try:
             return generate_embeddings(
@@ -169,7 +185,7 @@ class LightRAGCore:
 
     def _generate_document_embeddings(self, document: Document):
         embedding = self._get_embeddings([document.content])[0]
-        self.vector_storage.add_embedding(
+        self.vector_storage.upsert_embedding(
             "document",
             document.id,
             embedding,
@@ -178,6 +194,111 @@ class LightRAGCore:
                 "document_id": document.id,
             },
         )
+
+    def _profile_knowledge_graph(
+        self, entities: list[Entity], relations: list[Relation]
+    ) -> None:
+        unique_entities = list({entity.id: entity for entity in entities}.values())
+        unique_relations = list(
+            {relation.id: relation for relation in relations}.values()
+        )
+
+        for entity in unique_entities:
+            self.profiling_service.profile_entity(entity)
+
+        for relation in unique_relations:
+            self.profiling_service.profile_relation(relation)
+
+        self._upsert_entity_embeddings(unique_entities)
+        self._upsert_relation_embeddings(unique_relations)
+
+    def _upsert_entity_embeddings(self, entities: list[Entity]) -> None:
+        profiled_entities = [
+            entity
+            for entity in entities
+            if (entity.profile_key or "").strip()
+            and (entity.profile_value or "").strip()
+        ]
+        if not profiled_entities:
+            return
+
+        embedding_inputs = [
+            f"{entity.profile_key}\n{entity.name}\n{entity.profile_value}"
+            for entity in profiled_entities
+        ]
+        embeddings = self._get_embeddings(embedding_inputs)
+
+        for entity, embedding, embedding_input in zip(
+            profiled_entities, embeddings, embedding_inputs, strict=True
+        ):
+            self.vector_storage.upsert_embedding(
+                "entity",
+                entity.id,
+                embedding,
+                metadata={
+                    "entity_id": entity.id,
+                    "name": entity.name,
+                    "entity_type": entity.entity_type,
+                    "profile_key": entity.profile_key,
+                    "profile_value": entity.profile_value,
+                    "content": embedding_input,
+                },
+            )
+
+    def _upsert_relation_embeddings(self, relations: list[Relation]) -> None:
+        profiled_relations = [
+            relation
+            for relation in relations
+            if (relation.profile_key or "").strip()
+            and (relation.profile_value or "").strip()
+        ]
+        if not profiled_relations:
+            return
+
+        embedding_inputs = [
+            (
+                f"{relation.profile_key}\n"
+                f"{relation.source_entity.name} -> {relation.relation_type} -> "
+                f"{relation.target_entity.name}\n"
+                f"{relation.profile_value}"
+            )
+            for relation in profiled_relations
+        ]
+        embeddings = self._get_embeddings(embedding_inputs)
+
+        for relation, embedding, embedding_input in zip(
+            profiled_relations, embeddings, embedding_inputs, strict=True
+        ):
+            self.vector_storage.upsert_embedding(
+                "relation",
+                relation.id,
+                embedding,
+                metadata={
+                    "relation_id": relation.id,
+                    "source_entity_id": relation.source_entity_id,
+                    "target_entity_id": relation.target_entity_id,
+                    "relation_type": relation.relation_type,
+                    "profile_key": relation.profile_key,
+                    "profile_value": relation.profile_value,
+                    "content": embedding_input,
+                },
+            )
+
+    def backfill_profiles(
+        self, *, include_entities: bool = True, include_relations: bool = True
+    ) -> dict[str, int]:
+        entities = list(Entity.objects.all()) if include_entities else []
+        relations = (
+            list(Relation.objects.select_related("source_entity", "target_entity"))
+            if include_relations
+            else []
+        )
+
+        self._profile_knowledge_graph(entities, relations)
+        return {
+            "entities": len(entities),
+            "relations": len(relations),
+        }
 
     def delete_document(self, document_id: str) -> bool:
         try:
@@ -188,9 +309,9 @@ class LightRAGCore:
         except Document.DoesNotExist:
             return False
         except Exception as e:
-            raise RuntimeError(f"Failed to delete document: {e}")
+            raise RuntimeError(f"Failed to delete document: {e}") from e
 
-    def list_documents(self) -> List[Dict[str, Any]]:
+    def list_documents(self) -> list[dict[str, Any]]:
         documents = list(Document.objects.all())
         result = []
         for doc in documents:

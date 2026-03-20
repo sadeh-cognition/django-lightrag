@@ -465,6 +465,35 @@ class ChromaVectorStorage:
         except Exception as e:
             raise RuntimeError(f"Failed to add embedding: {e}")
 
+    def upsert_embedding(
+        self,
+        vector_type: str,
+        content_id: str,
+        embedding: List[float],
+        metadata: Dict[str, Any] = None,
+    ) -> str:
+        """Create or replace a vector embedding."""
+        if vector_type not in self.collections:
+            raise ValueError(f"Invalid vector type: {vector_type}")
+
+        collection = self.collections[vector_type]
+        metadata = metadata or {}
+        metadata.update(
+            {
+                "vector_type": vector_type,
+                "content_id": content_id,
+                "created_at": datetime.now().isoformat(),
+            }
+        )
+
+        try:
+            collection.upsert(
+                embeddings=[embedding], ids=[content_id], metadatas=[metadata]
+            )
+            return content_id
+        except Exception as e:
+            raise RuntimeError(f"Failed to upsert embedding: {e}")
+
     def get_embedding(self, vector_type: str, content_id: str) -> Optional[List[float]]:
         """Get a vector embedding by ID"""
         if vector_type not in self.collections:
@@ -542,8 +571,7 @@ class ChromaVectorStorage:
         metadata: Dict[str, Any] = None,
     ) -> bool:
         """Update a vector embedding"""
-        self.delete_embedding(vector_type, content_id)
-        self.add_embedding(vector_type, content_id, embedding, metadata)
+        self.upsert_embedding(vector_type, content_id, embedding, metadata)
         return True
 
     def close(self):
