@@ -215,6 +215,52 @@ class LightRAGCore:
         relevant_entities = self.query_engine.hydrate_entities(ent_vectors)
         relevant_relations = self.query_engine.hydrate_relations(rel_vectors)
 
+        # ONE-HOP GRAPH TRAVERSAL EXPANSION
+        graph_traversal_debug = None
+        if getattr(param, "one_hop_enabled", False):
+            expanded_entities, expanded_relations = (
+                self.query_engine.expand_one_hop_neighborhood(
+                    relevant_entities,
+                    relevant_relations,
+                    getattr(param, "one_hop_max_entities", 10),
+                    getattr(param, "one_hop_max_relations", 10),
+                )
+            )
+
+            # Stable merge: vector-ranked seeds first, append graph-only neighbors after them, deduping by PK
+            merged_entities = list(relevant_entities)
+            seen_entity_ids = {e.id for e in relevant_entities}
+            for e in expanded_entities:
+                if e.id not in seen_entity_ids:
+                    seen_entity_ids.add(e.id)
+                    merged_entities.append(e)
+
+            merged_relations = list(relevant_relations)
+            seen_relation_ids = {r.id for r in relevant_relations}
+            for r in expanded_relations:
+                if r.id not in seen_relation_ids:
+                    seen_relation_ids.add(r.id)
+                    merged_relations.append(r)
+
+            # Compute seed IDs correctly for debug output
+            seed_entity_ids = {e.id for e in relevant_entities}
+            for rel in relevant_relations:
+                seed_entity_ids.add(rel.source_entity_id)
+                seed_entity_ids.add(rel.target_entity_id)
+
+            graph_traversal_debug = {
+                "seed_entity_ids": list(seed_entity_ids),
+                "added_entity_ids": [e.id for e in expanded_entities],
+                "added_relation_ids": [r.id for r in expanded_relations],
+                "caps_applied": {
+                    "max_entities": getattr(param, "one_hop_max_entities", 10),
+                    "max_relations": getattr(param, "one_hop_max_relations", 10),
+                },
+            }
+
+            relevant_entities = merged_entities
+            relevant_relations = merged_relations
+
         # 4. Build context and generate response
         context = self.query_engine.build_context(
             relevant_documents, relevant_entities, relevant_relations, param
@@ -268,6 +314,9 @@ class LightRAGCore:
                 ],
             },
         }
+
+        if graph_traversal_debug:
+            context["graph_traversal"] = graph_traversal_debug
 
         response = self.query_engine.generate_response(query_text, context, param)
 

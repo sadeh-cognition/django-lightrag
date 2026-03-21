@@ -1,6 +1,6 @@
 # Generated migration to remove title field from Document model
 
-from django.db import migrations, models
+from django.db import migrations
 
 
 class Migration(migrations.Migration):

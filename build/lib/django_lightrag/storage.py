@@ -2,12 +2,12 @@
 Storage implementations for LightRAG Django app using LadybugDB and ChromaDB.
 """
 
-import os
-from typing import Any, Dict, List, Optional, Tuple, Union
-from pathlib import Path
 import json
+import os
 import uuid
 from datetime import datetime
+from pathlib import Path
+from typing import Any
 
 try:
     import real_ladybug as lb
@@ -20,7 +20,6 @@ except ImportError:
     chromadb = None
 
 from django.conf import settings
-from .models import Entity, Relation, VectorEmbedding, CacheEntry
 
 
 class LadybugGraphStorage:
@@ -96,11 +95,11 @@ class LadybugGraphStorage:
                 )
             """)
 
-        except Exception as e:
+        except Exception:
             # Schema might already exist, ignore
             pass
 
-    def add_entity(self, entity_data: Dict[str, Any]) -> str:
+    def add_entity(self, entity_data: dict[str, Any]) -> str:
         """Add an entity to the graph"""
         entity_id = entity_data.get("id", str(uuid.uuid4()))
 
@@ -122,7 +121,7 @@ class LadybugGraphStorage:
         except Exception as e:
             raise RuntimeError(f"Failed to add entity: {e}")
 
-    def add_relation(self, relation_data: Dict[str, Any]) -> str:
+    def add_relation(self, relation_data: dict[str, Any]) -> str:
         """Add a relation to the graph"""
         relation_id = relation_data.get("id", str(uuid.uuid4()))
 
@@ -149,7 +148,7 @@ class LadybugGraphStorage:
         except Exception as e:
             raise RuntimeError(f"Failed to add relation: {e}")
 
-    def add_entity_if_not_exists(self, entity_data: Union[Dict[str, Any], str]):
+    def add_entity_if_not_exists(self, entity_data: dict[str, Any] | str):
         """Add entity only if it doesn't exist"""
         if isinstance(entity_data, str):
             entity_payload = {
@@ -172,7 +171,7 @@ class LadybugGraphStorage:
         if not list(result):
             self.add_entity(entity_payload)
 
-    def get_entity(self, entity_id: str) -> Optional[Dict[str, Any]]:
+    def get_entity(self, entity_id: str) -> dict[str, Any] | None:
         """Get an entity by ID"""
         query = f"""
             SELECT * FROM Entity WHERE entity_id = '{entity_id}'
@@ -196,7 +195,7 @@ class LadybugGraphStorage:
         except Exception as e:
             raise RuntimeError(f"Failed to get entity: {e}")
 
-    def get_relation(self, source_id: str, target_id: str) -> Optional[Dict[str, Any]]:
+    def get_relation(self, source_id: str, target_id: str) -> dict[str, Any] | None:
         """Get a relation by source and target entity IDs"""
         query = f"""
             SELECT
@@ -225,7 +224,7 @@ class LadybugGraphStorage:
         except Exception as e:
             raise RuntimeError(f"Failed to get relation: {e}")
 
-    def get_all_entities(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    def get_all_entities(self, limit: int | None = None) -> list[dict[str, Any]]:
         """Get all entities"""
         limit_clause = f"LIMIT {limit}" if limit else ""
         query = f"""
@@ -251,7 +250,7 @@ class LadybugGraphStorage:
         except Exception as e:
             raise RuntimeError(f"Failed to get all entities: {e}")
 
-    def get_all_relations(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    def get_all_relations(self, limit: int | None = None) -> list[dict[str, Any]]:
         """Get all relations"""
         limit_clause = f"LIMIT {limit}" if limit else ""
         query = f"""
@@ -288,7 +287,7 @@ class LadybugGraphStorage:
 
     def get_entity_neighbors(
         self, entity_id: str, direction: str = "both"
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Get neighboring entities"""
         if direction == "outgoing":
             query = f"""
@@ -440,8 +439,8 @@ class ChromaVectorStorage:
         self,
         vector_type: str,
         content_id: str,
-        embedding: List[float],
-        metadata: Dict[str, Any] = None,
+        embedding: list[float],
+        metadata: dict[str, Any] = None,
     ) -> str:
         """Add a vector embedding"""
         if vector_type not in self.collections:
@@ -465,7 +464,7 @@ class ChromaVectorStorage:
         except Exception as e:
             raise RuntimeError(f"Failed to add embedding: {e}")
 
-    def get_embedding(self, vector_type: str, content_id: str) -> Optional[List[float]]:
+    def get_embedding(self, vector_type: str, content_id: str) -> list[float] | None:
         """Get a vector embedding by ID"""
         if vector_type not in self.collections:
             raise ValueError(f"Invalid vector type: {vector_type}")
@@ -483,10 +482,10 @@ class ChromaVectorStorage:
     def search_similar(
         self,
         vector_type: str,
-        query_embedding: List[float],
+        query_embedding: list[float],
         top_k: int = 10,
-        where: Dict[str, Any] = None,
-    ) -> List[Dict[str, Any]]:
+        where: dict[str, Any] = None,
+    ) -> list[dict[str, Any]]:
         """Search for similar vectors"""
         if vector_type not in self.collections:
             raise ValueError(f"Invalid vector type: {vector_type}")
@@ -538,8 +537,8 @@ class ChromaVectorStorage:
         self,
         vector_type: str,
         content_id: str,
-        embedding: List[float],
-        metadata: Dict[str, Any] = None,
+        embedding: list[float],
+        metadata: dict[str, Any] = None,
     ) -> bool:
         """Update a vector embedding"""
         self.delete_embedding(vector_type, content_id)

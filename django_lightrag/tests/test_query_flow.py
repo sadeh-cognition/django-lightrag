@@ -337,3 +337,113 @@ def test_query_endpoint_returns_extracted_keywords_in_context():
     assert "relations" in vmatch
     assert "hits" in vmatch["entities"]
     assert "query_source" in vmatch["entities"]
+
+
+@pytest.mark.django_db
+def test_query_one_hop_traversal_core_logic():
+    core = build_core("{}")
+
+    doc = Document.objects.get(id="query-doc")
+    target = Entity.objects.get(id="query-target")
+
+    neighbor_ent = Entity.objects.create(
+        id="neighbor-ent",
+        name="Unrelated",
+        entity_type="concept",
+        description="Neighbor.",
+        profile_key="Unrelated",
+        profile_value="Unrelated",
+        source_ids=[doc.id],
+        metadata={},
+    )
+    Relation.objects.create(
+        id="neighbor-rel",
+        source_entity=target,
+        target_entity=neighbor_ent,
+        relation_type="depends",
+        description="Neighbor relation.",
+        profile_key="depends",
+        profile_value="depends",
+        source_ids=[doc.id],
+        metadata={},
+    )
+
+    # Test one_hop_enabled=True
+    result = core.query(
+        "Policy Engine governance",
+        QueryParam(
+            mode="hybrid",
+            one_hop_enabled=True,
+            one_hop_max_entities=10,
+            one_hop_max_relations=10,
+        ),
+    )
+
+    source_entity_ids = [e["id"] for e in result.sources if e["type"] == "entity"]
+    source_relation_ids = [r["id"] for r in result.sources if r["type"] == "relation"]
+
+    assert "neighbor-ent" in source_entity_ids
+    assert "neighbor-rel" in source_relation_ids
+
+    gt = result.context["graph_traversal"]
+    assert "neighbor-ent" in gt["added_entity_ids"]
+    assert "neighbor-rel" in gt["added_relation_ids"]
+    assert gt["caps_applied"]["max_entities"] == 10
+
+
+@pytest.mark.django_db
+@override_settings(
+    LIGHTRAG={
+        "EMBEDDING_PROVIDER": "test",
+        "EMBEDDING_MODEL": "test-embedding",
+        "EMBEDDING_BASE_URL": "http://test.invalid",
+        "LLM_MODEL": "test-llm",
+        "CORE_FACTORY": "django_lightrag.tests.factories.make_test_core",
+    }
+)
+def test_query_endpoint_one_hop_schema_parsing():
+    doc = Document.objects.create(id="endpoint-doc", content="Test content")
+    entity = Entity.objects.create(
+        id="endpoint-entity",
+        name="Policy Engine",
+        entity_type="concept",
+        profile_key="Policy Engine",
+        metadata={},
+        source_ids=[doc.id],
+    )
+    target = Entity.objects.create(
+        id="endpoint-target",
+        name="Control Plane",
+        entity_type="concept",
+        profile_key="Control Plane",
+        metadata={},
+        source_ids=[doc.id],
+    )
+    Relation.objects.create(
+        id="endpoint-relation",
+        source_entity=entity,
+        target_entity=target,
+        relation_type="governs",
+        profile_key="governance",
+        metadata={},
+        source_ids=[doc.id],
+    )
+    client = TestClient(router)
+    response = client.post(
+        "/query",
+        json={
+            "query": "How does this work?",
+            "param": {
+                "mode": "hybrid",
+                "top_k": 5,
+                "one_hop_enabled": True,
+                "one_hop_max_entities": 2,
+                "one_hop_max_relations": 3,
+            },
+        },
+    )
+    if response.status_code != 200:
+        print(response.json())
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["context"]["graph_traversal"]["caps_applied"]["max_entities"] == 2

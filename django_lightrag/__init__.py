@@ -2,7 +2,7 @@ from typing import Any, Optional
 
 
 def run_update(
-    content: str, metadata: dict[str, Any], track_id: Optional[str] = None
+    content: str, metadata: dict[str, Any], track_id: str | None = None
 ) -> dict[str, Any]:
     """
     Ingest text content into LightRAG programmatically.
@@ -16,6 +16,7 @@ def run_update(
         Dictionary containing document_id or error information
     """
     from django.conf import settings
+
     from .core import LightRAGCore
 
     config = getattr(settings, "LIGHTRAG", {})

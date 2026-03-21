@@ -3,6 +3,7 @@ Django management command to ingest a document into LightRAG.
 """
 
 from django.core.management.base import BaseCommand, CommandError
+
 from django_lightrag.core.core import LightRAGCore
 
 

@@ -2,7 +2,7 @@ import hashlib
 import json
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import tiktoken
 from django.conf import settings
@@ -156,7 +156,7 @@ class LightRAGCore:
         user_prompt: str,
         _llm_model_func: Any,
         system_prompt: str | None = None,
-        history_messages: List[Dict[str, str]] | None = None,
+        history_messages: list[dict[str, str]] | None = None,
         max_tokens: int | None = None,
     ) -> str:
         """
@@ -219,7 +219,7 @@ class LightRAGCore:
 
     def _llm_extract_entities_relations(
         self, document: Document
-    ) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+    ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
         document_payload = {
             document.id: {
                 "tokens": self.tokenizer.count_tokens(document.content),
@@ -242,8 +242,8 @@ class LightRAGCore:
 
         document_results = extract_entities(document_payload, global_config)
 
-        entity_by_name: Dict[str, Dict[str, Any]] = {}
-        relation_by_key: Dict[str, Dict[str, Any]] = {}
+        entity_by_name: dict[str, dict[str, Any]] = {}
+        relation_by_key: dict[str, dict[str, Any]] = {}
 
         for maybe_nodes, maybe_edges in document_results:
             for entity_name, entity_list in maybe_nodes.items():
@@ -281,9 +281,9 @@ class LightRAGCore:
         return entity_by_name, relation_by_key
 
     def _persist_entities(
-        self, document: Document, entity_by_name: Dict[str, Dict[str, Any]]
-    ) -> Dict[str, Entity]:
-        entity_objects: Dict[str, Entity] = {}
+        self, document: Document, entity_by_name: dict[str, dict[str, Any]]
+    ) -> dict[str, Entity]:
+        entity_objects: dict[str, Entity] = {}
         for entity_name, entity_data in entity_by_name.items():
             entity_type = entity_data.get("entity_type", "other") or "other"
             entity_id = self._generate_id(f"entity:{entity_name}:{entity_type}")
@@ -331,7 +331,7 @@ class LightRAGCore:
         return entity_objects
 
     def _get_or_create_placeholder_entity(
-        self, document: Document, entity_objects: Dict[str, Entity], entity_name: str
+        self, document: Document, entity_objects: dict[str, Entity], entity_name: str
     ) -> Entity:
         if entity_name in entity_objects:
             return entity_objects[entity_name]
@@ -364,8 +364,8 @@ class LightRAGCore:
     def _persist_relations(
         self,
         document: Document,
-        relation_by_key: Dict[str, Dict[str, Any]],
-        entity_objects: Dict[str, Entity],
+        relation_by_key: dict[str, dict[str, Any]],
+        entity_objects: dict[str, Entity],
     ) -> None:
         for relation_data in relation_by_key.values():
             src_name = relation_data.get("src_id")
@@ -494,11 +494,11 @@ class LightRAGCore:
             tokens_used=self.tokenizer.count_tokens(response),
         )
 
-    def _get_query_embedding(self, query_text: str) -> List[float]:
+    def _get_query_embedding(self, query_text: str) -> list[float]:
         """Get embedding for query text"""
         return self._get_embeddings([query_text])[0]
 
-    def _get_embeddings(self, texts: List[str]) -> List[List[float]]:
+    def _get_embeddings(self, texts: list[str]) -> list[list[float]]:
         """Generate embeddings for a list of texts."""
         if not texts:
             raise ValueError("No texts provided for embedding generation.")
@@ -514,8 +514,8 @@ class LightRAGCore:
             raise RuntimeError(f"Failed to generate embeddings: {exc}") from exc
 
     def _retrieve_documents(
-        self, query_embedding: List[float], top_k: int
-    ) -> List[Document]:
+        self, query_embedding: list[float], top_k: int
+    ) -> list[Document]:
         """Retrieve relevant documents using vector similarity"""
         results = self.vector_storage.search_similar(
             "document", query_embedding, top_k=top_k
@@ -533,7 +533,7 @@ class LightRAGCore:
 
     def _retrieve_knowledge_graph(
         self, query_text: str, top_k: int
-    ) -> Tuple[List[Entity], List[Relation]]:
+    ) -> tuple[list[Entity], list[Relation]]:
         """Retrieve relevant entities and relations"""
         # Placeholder implementation - in practice, use graph traversal or entity matching
         entities = list(Entity.objects.all()[:top_k])
@@ -543,11 +543,11 @@ class LightRAGCore:
 
     def _build_context(
         self,
-        documents: List[Document],
-        entities: List[Entity],
-        relations: List[Relation],
+        documents: list[Document],
+        entities: list[Entity],
+        relations: list[Relation],
         param: QueryParam,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Build context for response generation"""
         context = {"documents": [], "entities": [], "relations": [], "total_tokens": 0}
 
@@ -610,7 +610,7 @@ class LightRAGCore:
         return context
 
     def _generate_response(
-        self, query_text: str, context: Dict[str, Any], param: QueryParam
+        self, query_text: str, context: dict[str, Any], param: QueryParam
     ) -> str:
         """Generate response based on context"""
         # Placeholder - in practice, use LLM to generate response
@@ -632,10 +632,10 @@ The actual implementation would use the context to provide a detailed, relevant 
 
     def _format_sources(
         self,
-        documents: List[Document],
-        entities: List[Entity],
-        relations: List[Relation],
-    ) -> List[Dict[str, Any]]:
+        documents: list[Document],
+        entities: list[Entity],
+        relations: list[Relation],
+    ) -> list[dict[str, Any]]:
         """Format sources for the response"""
         sources = []
 
@@ -703,7 +703,7 @@ The actual implementation would use the context to provide a detailed, relevant 
         except Exception as e:
             raise RuntimeError(f"Failed to delete document: {e}")
 
-    def list_documents(self) -> List[Dict[str, Any]]:
+    def list_documents(self) -> list[dict[str, Any]]:
         """List documents in the system"""
 
         documents = list(Document.objects.all())

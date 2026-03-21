@@ -27,4 +27,4 @@ Use `pytest` with `pytest-django`. Name files `test_*.py` and keep endpoint test
 Recent history uses short imperative subjects, often with an issue prefix, for example `#23: simplify core.py`. Keep commits focused and describe the behavioral change, not just the file touched. PRs should include a concise summary, linked issue or task, test evidence (`uv run pytest`, `uv run ruff check .`), and example API calls or terminal output when endpoints or CLI behavior change.
 
 ## Repository-Specific Rules
-Read `.agents/rules/` before substantial changes. Current rules require `uv`, `django-ninja`, ChromaDB for vector search, HTTP-first integration between TUI and backend, type hints with `django-stubs`, and functional endpoint tests without mocks.
+Read `.agents/rules/` before substantial changes. Current rules require `uv`, `django-ninja`, ChromaDB for vector search, ladybugdb for graph storage, HTTP-first integration between TUI and backend, type hints with `django-stubs`, and functional endpoint tests without mocks.

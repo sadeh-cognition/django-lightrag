@@ -13,6 +13,9 @@ class QueryParam:
     stream: bool = False  # TODO: remove this option
     low_level_keywords: list[str] = field(default_factory=list)
     high_level_keywords: list[str] = field(default_factory=list)
+    one_hop_enabled: bool = False
+    one_hop_max_entities: int = 10
+    one_hop_max_relations: int = 10
 
 
 @dataclass

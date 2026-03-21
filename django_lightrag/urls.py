@@ -4,6 +4,7 @@ URL configuration for core.
 
 from django.urls import path
 from ninja import NinjaAPI
+
 from .views import router as lightrag_router
 
 api = NinjaAPI(

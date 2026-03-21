@@ -21,8 +21,9 @@ class Command(BaseCommand):
         output_format = options["format"]
 
         # Get documents
-        from .core import LightRAGCore
         from django.conf import settings
+
+        from .core import LightRAGCore
 
         config = getattr(settings, "LIGHTRAG", {})
         embedding_model = config.get(

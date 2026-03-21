@@ -7,4 +7,4 @@ class LightragAppConfig(AppConfig):
     verbose_name = "LightRAG"
 
     def ready(self):
-        from . import signals
+        pass

@@ -1,5 +1,7 @@
 from typing import Any
 
+from django.db.models import Q
+
 from .llm import LLMService
 from .models import Document, Entity, Relation
 from .storage import ChromaVectorStorage
@@ -108,6 +110,52 @@ class QueryEngine:
             seen_ids.add(record.id)
             unique_records.append(record)
         return unique_records
+
+    def expand_one_hop_neighborhood(
+        self,
+        relevant_entities: list[Entity],
+        relevant_relations: list[Relation],
+        max_entities: int,
+        max_relations: int,
+    ) -> tuple[list[Entity], list[Relation]]:
+        """Expand the context by finding one-hop neighboring entities and relations.
+        Excludes the seeds that were already found via vector matching.
+        """
+        seed_entity_ids = {e.id for e in relevant_entities}
+        for rel in relevant_relations:
+            seed_entity_ids.add(rel.source_entity_id)
+            seed_entity_ids.add(rel.target_entity_id)
+
+        if not seed_entity_ids:
+            return [], []
+
+        # Find one-hop incident relations
+        neighbor_relations = list(
+            Relation.objects.filter(
+                Q(source_entity_id__in=seed_entity_ids)
+                | Q(target_entity_id__in=seed_entity_ids)
+            )
+            .select_related("source_entity", "target_entity")
+            .order_by("-weight", "-updated_at")
+        )
+
+        # Exclude relations that are already seeds
+        seed_relation_ids = {r.id for r in relevant_relations}
+        new_relations = [
+            r for r in neighbor_relations if r.id not in seed_relation_ids
+        ][:max_relations]
+
+        # Extract resulting new entities from the endpoints of the relations
+        new_entities_dict = {}
+        for r in new_relations:
+            if r.source_entity_id not in seed_entity_ids:
+                new_entities_dict[r.source_entity_id] = r.source_entity
+            if r.target_entity_id not in seed_entity_ids:
+                new_entities_dict[r.target_entity_id] = r.target_entity
+
+        new_entities = list(new_entities_dict.values())[:max_entities]
+
+        return new_entities, new_relations
 
     def build_context(
         self,

@@ -2,18 +2,17 @@
 Django API views for LightRAG using django-ninja.
 """
 
-from typing import List, Dict
 from ninja import Router
 
 from .core import LightRAGCore, QueryParam
 from .schemas import (
     DocumentIngestSchema,
     DocumentSchema,
+    EntitySchema,
+    ErrorResponseSchema,
     QueryRequestSchema,
     QueryResultSchema,
-    EntitySchema,
     RelationSchema,
-    ErrorResponseSchema,
     SuccessResponseSchema,
 )
 
@@ -21,7 +20,7 @@ router = Router()
 
 
 @router.post(
-    "/documents/ingest", response={201: Dict[str, str], 400: ErrorResponseSchema}
+    "/documents/ingest", response={201: dict[str, str], 400: ErrorResponseSchema}
 )
 def ingest_document(request, data: DocumentIngestSchema):
     """Ingest a document into the system"""
@@ -44,7 +43,7 @@ def ingest_document(request, data: DocumentIngestSchema):
 
 
 @router.get(
-    "/documents", response={200: List[DocumentSchema], 400: ErrorResponseSchema}
+    "/documents", response={200: list[DocumentSchema], 400: ErrorResponseSchema}
 )
 def list_documents(request):
     """List documents in the system"""
@@ -111,7 +110,7 @@ def delete_document(request, document_id: str):
         return 400, {"error": "deletion_failed", "message": str(e)}
 
 
-@router.get("/entities", response={200: List[EntitySchema], 400: ErrorResponseSchema})
+@router.get("/entities", response={200: list[EntitySchema], 400: ErrorResponseSchema})
 def list_entities(request, limit: Optional[int] = None):
     """List entities in the system"""
     try:
@@ -128,7 +127,7 @@ def list_entities(request, limit: Optional[int] = None):
 
 
 @router.get(
-    "/relations", response={200: List[RelationSchema], 400: ErrorResponseSchema}
+    "/relations", response={200: list[RelationSchema], 400: ErrorResponseSchema}
 )
 def list_relations(request, limit: Optional[int] = None):
     """List relations in the system"""
@@ -145,7 +144,7 @@ def list_relations(request, limit: Optional[int] = None):
         return 400, {"error": "list_failed", "message": str(e)}
 
 
-@router.get("/health", response=Dict[str, str])
+@router.get("/health", response=dict[str, str])
 def health_check(request):
     """Health check endpoint"""
     return {"status": "healthy", "service": "lightrag-django"}

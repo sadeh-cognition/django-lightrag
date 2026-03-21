@@ -27,6 +27,9 @@ class QueryParamSchema(Schema):
     stream: bool = False
     low_level_keywords: list[str] = Field(default_factory=list)
     high_level_keywords: list[str] = Field(default_factory=list)
+    one_hop_enabled: bool = False
+    one_hop_max_entities: int = 10
+    one_hop_max_relations: int = 10
 
 
 class QueryRequestSchema(Schema):

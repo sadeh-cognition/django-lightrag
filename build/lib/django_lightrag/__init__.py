@@ -2,7 +2,7 @@ from typing import Any, Optional
 
 
 def run_update(
-    content: str, metadata: dict[str, Any], track_id: Optional[str] = None
+    content: str, metadata: dict[str, Any], track_id: str | None = None
 ) -> dict[str, Any]:
     """
     Ingest text content into LightRAG programmatically.

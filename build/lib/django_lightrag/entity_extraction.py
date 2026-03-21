@@ -6,8 +6,8 @@ import logging
 import re
 import time
 from collections import defaultdict
-from dataclasses import dataclass
-from typing import Any, Callable, Protocol, TypedDict
+from collections.abc import Callable
+from typing import Any, Protocol, TypedDict
 
 logger = logging.getLogger(__name__)
 
