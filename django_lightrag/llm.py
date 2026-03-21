@@ -17,6 +17,7 @@ class LLMService:
         self,
         user_prompt: str,
         system_prompt: str | None = None,
+        history_messages: list[dict[str, str]] | None = None,
         max_tokens: int | None = None,
         temperature: float | None = None,
     ) -> str:

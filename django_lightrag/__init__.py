@@ -34,6 +34,7 @@ def run_update(
             document_id = core.ingest_document(
                 content=content,
                 metadata=metadata,
+                track_id=track_id or "",
             )
             return {
                 "document_id": document_id,
