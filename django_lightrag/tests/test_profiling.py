@@ -373,9 +373,10 @@ def test_entity_and_relation_vector_upserts_and_profile_retrieval():
     assert "Governance oversight connects" in relation_record["metadatas"][0]["content"]
 
     query_embedding = core._get_query_embedding("governance")
-    entities, relations = core.query_engine.retrieve_knowledge_graph(
-        query_embedding, top_k=2
-    )
+    ent_vectors = core.query_engine.search_entity_vectors(query_embedding, top_k=2)
+    rel_vectors = core.query_engine.search_relation_vectors(query_embedding, top_k=2)
+    entities = core.query_engine.hydrate_entities(ent_vectors)
+    relations = core.query_engine.hydrate_relations(rel_vectors)
 
     assert [entity.id for entity in entities][0] == policy_engine.id
     assert [relation.id for relation in relations][0] == relation.id

@@ -11,6 +11,10 @@ from .types import QueryParam, QueryResult
 class QueryEngine:
     """Handles RAG retrieval and response generation"""
 
+    GROUNDED_FALLBACK_RESPONSE = (
+        "I don't have enough information in the provided context to answer your query."
+    )
+
     def __init__(
         self,
         llm_service: LLMService,
@@ -174,35 +178,24 @@ class QueryEngine:
                 "high_level_keywords": list(param.high_level_keywords),
             },
             "total_tokens": 0,
+            "aggregated_context": "",
         }
 
-        # Add documents
-        for document in documents:
-            document_text = document.content
-            if (
-                context["total_tokens"] + self.tokenizer.count_tokens(document_text)
-                > param.max_tokens
-            ):
-                document_text = self.tokenizer.truncate_by_tokens(
-                    document_text, param.max_tokens - context["total_tokens"]
-                )
+        aggregated_chunks = []
 
-            context["documents"].append(
-                {
-                    "content": document_text,
-                    "document_id": document.id,
-                }
-            )
-            context["total_tokens"] += self.tokenizer.count_tokens(document_text)
-
-        # Add entities
+        # Add entities first (Graph-first strategy)
         for entity in entities:
             profile_text = entity.profile_value or entity.description
-            entity_text = f"{entity.name} ({entity.entity_type}): {profile_text}"
-            if (
-                context["total_tokens"] + self.tokenizer.count_tokens(entity_text)
-                > param.max_tokens
-            ):
+            entity_chunk = "\n".join(
+                [
+                    "Entity",
+                    f"Name: {entity.name}",
+                    f"Type: {entity.entity_type}",
+                    f"Summary: {profile_text}",
+                ]
+            )
+            tokens = self.tokenizer.count_tokens(entity_chunk)
+            if context["total_tokens"] + tokens > param.max_tokens:
                 break
 
             context["entities"].append(
@@ -213,19 +206,23 @@ class QueryEngine:
                     "profile_key": entity.profile_key,
                 }
             )
-            context["total_tokens"] += self.tokenizer.count_tokens(entity_text)
+            context["total_tokens"] += tokens
+            aggregated_chunks.append(entity_chunk)
 
-        # Add relations
+        # Add relations next
         for relation in relations:
             profile_text = relation.profile_value or relation.description
-            relation_text = (
-                f"{relation.source_entity.name} -> {relation.relation_type} -> "
-                f"{relation.target_entity.name}: {profile_text}"
+            relation_chunk = "\n".join(
+                [
+                    "Relation",
+                    f"Source: {relation.source_entity.name}",
+                    f"Type: {relation.relation_type}",
+                    f"Target: {relation.target_entity.name}",
+                    f"Summary: {profile_text}",
+                ]
             )
-            if (
-                context["total_tokens"] + self.tokenizer.count_tokens(relation_text)
-                > param.max_tokens
-            ):
+            tokens = self.tokenizer.count_tokens(relation_chunk)
+            if context["total_tokens"] + tokens > param.max_tokens:
                 break
 
             context["relations"].append(
@@ -237,30 +234,83 @@ class QueryEngine:
                     "profile_key": relation.profile_key,
                 }
             )
-            context["total_tokens"] += self.tokenizer.count_tokens(relation_text)
+            context["total_tokens"] += tokens
+            aggregated_chunks.append(relation_chunk)
 
+        # Add documents last
+        for document in documents:
+            document_text = document.content
+            document_chunk = "\n".join(
+                [
+                    "Document",
+                    f"Document ID: {document.id}",
+                    f"Excerpt: {document_text}",
+                ]
+            )
+            tokens = self.tokenizer.count_tokens(document_chunk)
+            if context["total_tokens"] + tokens > param.max_tokens:
+                remaining_tokens = param.max_tokens - context["total_tokens"]
+                if remaining_tokens <= 0:
+                    break
+                document_text = self.tokenizer.truncate_by_tokens(
+                    document_text, remaining_tokens
+                ).strip()
+                if not document_text:
+                    break
+                document_chunk = "\n".join(
+                    [
+                        "Document",
+                        f"Document ID: {document.id}",
+                        f"Excerpt: {document_text}",
+                    ]
+                )
+                tokens = self.tokenizer.count_tokens(document_chunk)
+                if context["total_tokens"] + tokens > param.max_tokens:
+                    break
+
+            context["documents"].append(
+                {
+                    "content": document_text,
+                    "document_id": document.id,
+                }
+            )
+            context["total_tokens"] += tokens
+            aggregated_chunks.append(document_chunk)
+
+        context["aggregated_context"] = "\n\n".join(aggregated_chunks)
         return context
+
+    generate_system_prompt = """You are a retrieval-augmented assistant.
+
+Answer the user using only the provided context.
+Do not invent, assume, or import outside knowledge.
+Preserve the user's language.
+If the context does not contain enough information, reply that you do not have enough information from the provided context.
+Do not add a references section or cite sources inline.
+
+Context:
+{context}
+"""
 
     def generate_response(
         self, query_text: str, context: dict[str, Any], param: QueryParam
     ) -> str:
-        """Generate response based on context"""
-        # Placeholder - in practice, use LLM to generate response
-        # context_text = json.dumps(context, indent=2)
+        """Generate response based on context using LLM"""
+        aggregated_context = context.get("aggregated_context", "").strip()
 
-        response = f"""Based on the provided context, here's my response to your query "{query_text}":
+        if not aggregated_context:
+            return self.GROUNDED_FALLBACK_RESPONSE
 
-This is a placeholder response. In a real implementation, this would be generated by an LLM using the retrieved context.
+        system_prompt = self.generate_system_prompt.format(context=aggregated_context)
 
-Context summary:
-- {len(context["documents"])} relevant documents
-- {len(context["entities"])} relevant entities
-- {len(context["relations"])} relevant relations
-- Total context tokens: {context["total_tokens"]}
-
-The actual implementation would use the context to provide a detailed, relevant answer to your query.
-"""
-        return response
+        try:
+            return self.llm_service.call_llm(
+                user_prompt=query_text,
+                system_prompt=system_prompt,
+                temperature=param.temperature,
+            )
+        except Exception:
+            return self.GROUNDED_FALLBACK_RESPONSE
 
     def format_sources(
         self,

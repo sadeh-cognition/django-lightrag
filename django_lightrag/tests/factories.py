@@ -10,9 +10,15 @@ class EndpointLLMService:
         self,
         user_prompt: str,
         system_prompt: str | None = None,
-        history_messages=None,
+        history_messages: list[dict[str, str]] | None = None,
         max_tokens: int | None = None,
+        temperature: float | None = None,
     ) -> str:
+        if (
+            system_prompt
+            and "Answer the user using only the provided context." in system_prompt
+        ):
+            return f"Generated answer for: {user_prompt}"
         return json.dumps(
             {
                 "low_level_keywords": ["Policy Engine"],
@@ -112,12 +118,12 @@ def make_test_core(
         "entity",
         entity.id,
         core._get_embeddings(["Policy Engine"])[0],
-        metadata={"entity_id": entity.id},
+        metadata={"entity_id": entity.id, "profile_key": entity.profile_key},
     )
     vector_storage.upsert_embedding(
         "relation",
         relation.id,
         core._get_embeddings(["governance"])[0],
-        metadata={"relation_id": relation.id},
+        metadata={"relation_id": relation.id, "profile_key": relation.profile_key},
     )
     return core

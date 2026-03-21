@@ -14,14 +14,29 @@ from django_lightrag.views import router
 class QueryLLMService:
     def __init__(self, response: str):
         self.response = response
+        self.calls: list[dict[str, object | None]] = []
 
     def call_llm(
         self,
         user_prompt: str,
         system_prompt: str | None = None,
-        history_messages=None,
+        history_messages: list[dict[str, str]] | None = None,
         max_tokens: int | None = None,
+        temperature: float | None = None,
     ) -> str:
+        self.calls.append(
+            {
+                "user_prompt": user_prompt,
+                "system_prompt": system_prompt,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+            }
+        )
+        if (
+            system_prompt
+            and "Answer the user using only the provided context." in system_prompt
+        ):
+            return f"Generated answer for: {user_prompt}"
         return self.response
 
 
@@ -90,12 +105,13 @@ class DeterministicQueryCore(LightRAGCore):
 
 def build_core(llm_response: str) -> DeterministicQueryCore:
     vector_storage = QueryVectorStorage()
+    llm_service = QueryLLMService(llm_response)
     core = DeterministicQueryCore(
         embedding_model="test-embedding",
         embedding_provider="test",
         embedding_base_url="http://test.invalid",
         llm_model="test-llm",
-        llm_service=QueryLLMService(llm_response),
+        llm_service=llm_service,
         graph_storage=QueryGraphStorage(),
         vector_storage=vector_storage,
         tokenizer=Tokenizer(),
@@ -186,6 +202,26 @@ def test_query_uses_split_keywords_for_retrieval_and_context():
     assert result.context["entities"][0]["name"] == "Policy Engine"
     assert result.context["relations"][0]["relation_type"] == "governs"
 
+    # Verify context and generated response
+    assert result.response == "Generated answer for: How are decisions enforced?"
+    aggregated_context = result.context["aggregated_context"]
+    assert "Entity\nName: Policy Engine" in aggregated_context
+    assert "Relation\nSource: Policy Engine" in aggregated_context
+    assert "Document\nDocument ID: query-doc" in aggregated_context
+    # Assert graph-first order
+    entity_idx = aggregated_context.find("Entity\nName: Policy Engine")
+    relation_idx = aggregated_context.find("Relation\nSource: Policy Engine")
+    doc_idx = aggregated_context.find("Document\nDocument ID: query-doc")
+    assert entity_idx < relation_idx < doc_idx
+    assert aggregated_context == "\n\n".join(
+        [
+            "Entity\nName: Policy Engine\nType: concept\nSummary: Entity profile for the Policy Engine.",
+            "Relation\nSource: Policy Engine\nType: governs\nTarget: Control Plane\nSummary: Relation profile for governance workflows.",
+            "Document\nDocument ID: query-doc\nExcerpt: This document explains how Policy Engine decisions are recorded.",
+        ]
+    )
+    assert core.llm_service.calls[-1]["temperature"] == QueryParam().temperature
+
     # Assert exactly one batched embedding call was made for retrieval
     assert len(core.embedding_calls) == 1
     assert core.embedding_calls[0] == [
@@ -236,6 +272,23 @@ def test_query_mode_controls_knowledge_graph_retrieval():
 
 
 @pytest.mark.django_db
+def test_query_returns_fallback_message_with_empty_context():
+    core = build_core("{}")
+
+    # Delete all items to make the context completely empty
+    Document.objects.all().delete()
+    Entity.objects.all().delete()
+    Relation.objects.all().delete()
+
+    result = core.query("What is the policy engine?", QueryParam(mode="hybrid"))
+    assert (
+        result.response
+        == "I don't have enough information in the provided context to answer your query."
+    )
+    assert result.context["aggregated_context"] == ""
+
+
+@pytest.mark.django_db
 def test_query_falls_back_to_raw_query_when_keyword_extraction_fails():
     core = build_core("not valid json")
 
@@ -251,6 +304,7 @@ def test_query_falls_back_to_raw_query_when_keyword_extraction_fails():
     assert [item["relation_type"] for item in result.context["relations"]] == [
         "governs"
     ]
+    assert result.response == "Generated answer for: Policy Engine governance document"
 
     # Verify fallback query text
     assert len(core.embedding_calls) == 1
@@ -325,10 +379,18 @@ def test_query_endpoint_returns_extracted_keywords_in_context():
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload["response"] == "Generated answer for: How does this work?"
     assert payload["context"]["query_keywords"] == {
         "low_level_keywords": ["Policy Engine"],
         "high_level_keywords": ["governance"],
     }
+    assert payload["context"]["aggregated_context"] == "\n\n".join(
+        [
+            "Entity\nName: Policy Engine\nType: concept\nSummary: Entity profile for the Policy Engine.",
+            "Relation\nSource: Policy Engine\nType: governs\nTarget: Control Plane\nSummary: Relation profile for governance workflows.",
+            "Document\nDocument ID: endpoint-doc\nExcerpt: A document about Policy Engine governance.",
+        ]
+    )
 
     # Endpoint coverage for vector matching structure
     vmatch = payload["context"]["vector_matching"]

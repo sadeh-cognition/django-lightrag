@@ -22,6 +22,7 @@ class LLMService:
         system_prompt: str | None = None,
         history_messages: list[dict[str, str]] | None = None,
         max_tokens: int | None = None,
+        temperature: float | None = None,
     ) -> str:
         """
         Adapter for LLM completion using django-llm-chat.
@@ -63,7 +64,7 @@ class LLMService:
             self.model,
             user_prompt,
             include_chat_history=True,
-            temperature=self.temperature,
+            temperature=temperature if temperature is not None else self.temperature,
             max_tokens=max_tokens,
         )
         return llm_msg.text or ""
