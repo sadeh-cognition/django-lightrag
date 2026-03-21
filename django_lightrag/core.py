@@ -9,6 +9,7 @@ try:
 except ImportError:
     generate_embeddings = None
 
+from .deduplication import DeduplicationResult, GraphDeduplicationService
 from .entity_extraction import DEFAULT_ENTITY_TYPES, DEFAULT_SUMMARY_LANGUAGE
 from .graph_builder import KnowledgeGraphBuilder
 from .llm import LLMService
@@ -54,6 +55,10 @@ class LightRAGCore:
         self.profiling_service = ProfilingService(
             llm_service=self.llm_service,
             config={"PROFILE_MAX_TOKENS": self.config.get("PROFILE_MAX_TOKENS", 400)},
+        )
+        self.deduplication_service = GraphDeduplicationService(
+            graph_storage=self.graph_storage,
+            vector_storage=self.vector_storage,
         )
 
         # Initialize specialized components
@@ -115,10 +120,22 @@ class LightRAGCore:
             # 2. Extract KG and persist
             entities, relations = self.graph_builder.extract_and_persist(document)
 
-            # 3. Generate entity and relation profiles plus vector entries
-            self._profile_knowledge_graph(entities, relations)
+            # 3. Deduplicate touched records before profiling and vector upserts
+            dedup_result = self._deduplicate_graph_records(
+                include_entities=True,
+                include_relations=True,
+                entity_ids=[entity.id for entity in entities],
+                relation_ids=[relation.id for relation in relations],
+                profile_survivors=False,
+            )
 
-            # 4. Generate and store document embeddings
+            # 4. Generate entity and relation profiles plus vector entries
+            self._profile_knowledge_graph(
+                dedup_result.surviving_entities or entities,
+                dedup_result.surviving_relations or relations,
+            )
+
+            # 5. Generate and store document embeddings
             self._generate_document_embeddings(document)
 
             return document_id
@@ -299,6 +316,47 @@ class LightRAGCore:
             "entities": len(entities),
             "relations": len(relations),
         }
+
+    def deduplicate_graph(
+        self,
+        *,
+        include_entities: bool = True,
+        include_relations: bool = True,
+        entity_ids: list[str] | None = None,
+        relation_ids: list[str] | None = None,
+    ) -> dict[str, int]:
+        result = self._deduplicate_graph_records(
+            include_entities=include_entities,
+            include_relations=include_relations,
+            entity_ids=entity_ids,
+            relation_ids=relation_ids,
+            profile_survivors=True,
+        )
+        return result.as_counts()
+
+    def _deduplicate_graph_records(
+        self,
+        *,
+        include_entities: bool,
+        include_relations: bool,
+        entity_ids: list[str] | None,
+        relation_ids: list[str] | None,
+        profile_survivors: bool,
+    ) -> DeduplicationResult:
+        result = self.deduplication_service.deduplicate(
+            include_entities=include_entities,
+            include_relations=include_relations,
+            entity_ids=entity_ids,
+            relation_ids=relation_ids,
+        )
+        if profile_survivors and (
+            result.surviving_entities or result.surviving_relations
+        ):
+            self._profile_knowledge_graph(
+                result.surviving_entities,
+                result.surviving_relations,
+            )
+        return result
 
     def delete_document(self, document_id: str) -> bool:
         try:

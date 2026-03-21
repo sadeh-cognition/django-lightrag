@@ -122,6 +122,11 @@ class LadybugGraphStorage:
         except Exception as e:
             raise RuntimeError(f"Failed to add entity: {e}")
 
+    def upsert_entity_node(self, entity_data: Dict[str, Any]) -> str:
+        entity_id = entity_data["id"]
+        self.remove_entity_node(entity_id)
+        return self.add_entity(entity_data)
+
     def add_relation(self, relation_data: Dict[str, Any]) -> str:
         """Add a relation to the graph"""
         relation_id = relation_data.get("id", str(uuid.uuid4()))
@@ -148,6 +153,14 @@ class LadybugGraphStorage:
             return relation_id
         except Exception as e:
             raise RuntimeError(f"Failed to add relation: {e}")
+
+    def upsert_relation_edge(self, relation_data: Dict[str, Any]) -> str:
+        source_ref = relation_data["source_entity"]
+        target_ref = relation_data["target_entity"]
+        source_id = source_ref["id"] if isinstance(source_ref, dict) else source_ref
+        target_id = target_ref["id"] if isinstance(target_ref, dict) else target_ref
+        self.remove_relation_edge(source_id, target_id)
+        return self.add_relation(relation_data)
 
     def add_entity_if_not_exists(self, entity_data: Union[Dict[str, Any], str]):
         """Add entity only if it doesn't exist"""
@@ -365,6 +378,9 @@ class LadybugGraphStorage:
         except Exception as e:
             raise RuntimeError(f"Failed to delete entity: {e}")
 
+    def remove_entity_node(self, entity_id: str) -> bool:
+        return self.delete_entity(entity_id)
+
     def delete_relation(self, source_id: str, target_id: str) -> bool:
         """Delete a relation between two entities"""
         try:
@@ -377,6 +393,9 @@ class LadybugGraphStorage:
             return True
         except Exception as e:
             raise RuntimeError(f"Failed to delete relation: {e}")
+
+    def remove_relation_edge(self, source_id: str, target_id: str) -> bool:
+        return self.delete_relation(source_id, target_id)
 
     def close(self):
         """Close the database connection"""

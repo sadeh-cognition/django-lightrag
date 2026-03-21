@@ -1,6 +1,7 @@
 import hashlib
 from typing import Any
 
+from .deduplication import canonical_entity_id, canonical_relation_id
 from .entity_extraction import extract_entities
 from .models import Document, Entity, Relation
 from .storage import LadybugGraphStorage
@@ -172,7 +173,7 @@ class KnowledgeGraphBuilder:
 
         for entity_name, entity_data in entity_by_name.items():
             entity_type = entity_data.get("entity_type", "other") or "other"
-            entity_id = self._generate_id(f"entity:{entity_name}:{entity_type}")
+            entity_id = canonical_entity_id(entity_name, entity_type)
             description_fragments = self._normalize_string_list(
                 entity_data.get("descriptions", [])
             )
@@ -228,21 +229,37 @@ class KnowledgeGraphBuilder:
         if entity_name in entity_objects:
             return entity_objects[entity_name]
 
-        existing_entity = (
-            Entity.objects.filter(name=entity_name).order_by("-updated_at").first()
+        existing_other_entity = (
+            Entity.objects.filter(name=entity_name, entity_type="other")
+            .order_by("-updated_at")
+            .first()
         )
-        if existing_entity is not None:
+        if existing_other_entity is not None:
             merged_source_ids = self._merge_strings(
-                existing_entity.source_ids, source_ids
+                existing_other_entity.source_ids, source_ids
             )
-            if merged_source_ids != existing_entity.source_ids:
-                existing_entity.source_ids = merged_source_ids
-                existing_entity.save(update_fields=["source_ids", "updated_at"])
-            entity_objects[entity_name] = existing_entity
-            return existing_entity
+            if merged_source_ids != existing_other_entity.source_ids:
+                existing_other_entity.source_ids = merged_source_ids
+                existing_other_entity.save(update_fields=["source_ids", "updated_at"])
+            entity_objects[entity_name] = existing_other_entity
+            return existing_other_entity
+
+        typed_entities = list(
+            Entity.objects.filter(name=entity_name)
+            .exclude(entity_type="other")
+            .order_by("-updated_at")[:2]
+        )
+        if len(typed_entities) == 1:
+            typed_entity = typed_entities[0]
+            merged_source_ids = self._merge_strings(typed_entity.source_ids, source_ids)
+            if merged_source_ids != typed_entity.source_ids:
+                typed_entity.source_ids = merged_source_ids
+                typed_entity.save(update_fields=["source_ids", "updated_at"])
+            entity_objects[entity_name] = typed_entity
+            return typed_entity
 
         entity_type = "other"
-        entity_id = self._generate_id(f"entity:{entity_name}:{entity_type}")
+        entity_id = canonical_entity_id(entity_name, entity_type)
         entity, _ = Entity.objects.get_or_create(
             id=entity_id,
             defaults={
@@ -290,9 +307,10 @@ class KnowledgeGraphBuilder:
 
             relation_type = relation_data.get("relation_type") or "related_to"
             relation_type = relation_type[:100] if relation_type else "related_to"
-            relation_id = self._generate_id(
-                f"relation:{min(source_entity.id, target_entity.id)}:"
-                f"{max(source_entity.id, target_entity.id)}:{relation_type}"
+            relation_id = canonical_relation_id(
+                source_entity.id,
+                target_entity.id,
+                relation_type,
             )
 
             description_fragments = self._normalize_string_list(
