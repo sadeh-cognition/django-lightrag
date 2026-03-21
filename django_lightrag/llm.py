@@ -1,6 +1,6 @@
+from django.contrib.auth import get_user_model
 from django_llm_chat.chat import Chat
 from django_llm_chat.models import Project
-from django.contrib.auth import get_user_model
 
 
 class LLMService:
@@ -9,8 +9,8 @@ class LLMService:
     def __init__(self, model: str, temperature: float = 0.0):
         self.model = model
         self.temperature = temperature
-        User = get_user_model()
-        self.user, _ = User.objects.get_or_create(username="lightrag_django")
+        user_model = get_user_model()
+        self.user, _ = user_model.objects.get_or_create(username="lightrag_django")
         self.project, _ = Project.objects.get_or_create(name="lightrag_django")
 
     def call_llm(

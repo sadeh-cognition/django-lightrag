@@ -12,8 +12,11 @@ from typing import Any, Protocol, TypedDict
 logger = logging.getLogger(__name__)
 
 
-class PipelineCancelledException(Exception):
+class PipelineCancelledError(Exception):
     """Raised when a user cancels a pipeline operation."""
+
+
+PipelineCancelledException = PipelineCancelledError
 
 
 class DocumentSchema(TypedDict, total=False):
@@ -570,13 +573,13 @@ def _handle_single_entity_extraction(
             )
             return None
 
-        return dict(
-            entity_name=entity_name,
-            entity_type=entity_type,
-            description=entity_description,
-            source_id=document_key,
-            timestamp=timestamp,
-        )
+        return {
+            "entity_name": entity_name,
+            "entity_type": entity_type,
+            "description": entity_description,
+            "source_id": document_key,
+            "timestamp": timestamp,
+        }
 
     except ValueError as e:
         logger.error(
@@ -651,15 +654,15 @@ def _handle_single_relationship_extraction(
             else 1.0
         )
 
-        return dict(
-            src_id=source,
-            tgt_id=target,
-            weight=weight,
-            description=edge_description,
-            keywords=edge_keywords,
-            source_id=edge_source_id,
-            timestamp=timestamp,
-        )
+        return {
+            "src_id": source,
+            "tgt_id": target,
+            "weight": weight,
+            "description": edge_description,
+            "keywords": edge_keywords,
+            "source_id": edge_source_id,
+            "timestamp": timestamp,
+        }
 
     except ValueError as e:
         logger.warning(
@@ -797,9 +800,7 @@ def extract_entities(
     if pipeline_status is not None and pipeline_status_lock is not None:
         with pipeline_status_lock:
             if pipeline_status.get("cancellation_requested", False):
-                raise PipelineCancelledException(
-                    "User cancelled during entity extraction"
-                )
+                raise PipelineCancelledError("User cancelled during entity extraction")
 
     llm_callable: callable = global_config["llm_model_func"]
     entity_extract_max_gleaning = global_config["entity_extract_max_gleaning"]
@@ -813,22 +814,22 @@ def extract_entities(
 
     examples = "\n".join(PROMPTS["entity_extraction_examples"])
 
-    example_context_base = dict(
-        tuple_delimiter=PROMPTS["DEFAULT_TUPLE_DELIMITER"],
-        completion_delimiter=PROMPTS["DEFAULT_COMPLETION_DELIMITER"],
-        entity_types=", ".join(entity_types),
-        language=language,
-    )
+    example_context_base = {
+        "tuple_delimiter": PROMPTS["DEFAULT_TUPLE_DELIMITER"],
+        "completion_delimiter": PROMPTS["DEFAULT_COMPLETION_DELIMITER"],
+        "entity_types": ", ".join(entity_types),
+        "language": language,
+    }
     # add example's format
     examples = examples.format(**example_context_base)
 
-    context_base = dict(
-        tuple_delimiter=PROMPTS["DEFAULT_TUPLE_DELIMITER"],
-        completion_delimiter=PROMPTS["DEFAULT_COMPLETION_DELIMITER"],
-        entity_types=",".join(entity_types),
-        examples=examples,
-        language=language,
-    )
+    context_base = {
+        "tuple_delimiter": PROMPTS["DEFAULT_TUPLE_DELIMITER"],
+        "completion_delimiter": PROMPTS["DEFAULT_COMPLETION_DELIMITER"],
+        "entity_types": ",".join(entity_types),
+        "examples": examples,
+        "language": language,
+    }
 
     processed_documents = 0
     total_documents = len(ordered_documents)
@@ -978,7 +979,7 @@ def extract_entities(
         if pipeline_status is not None and pipeline_status_lock is not None:
             with pipeline_status_lock:
                 if pipeline_status.get("cancellation_requested", False):
-                    raise PipelineCancelledException(
+                    raise PipelineCancelledError(
                         "User cancelled during document processing"
                     )
 

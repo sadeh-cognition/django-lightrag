@@ -4,6 +4,7 @@ Django management command to query the LightRAG system.
 
 from django.core.management.base import BaseCommand, CommandError
 
+from django_lightrag.config import get_lightrag_core_settings
 from django_lightrag.core import LightRAGCore, QueryParam
 
 
@@ -63,22 +64,14 @@ class Command(BaseCommand):
         )
 
         # Query the system
-        from django.conf import settings
-
-        config = getattr(settings, "LIGHTRAG", {})
-        embedding_model = config.get(
-            "EMBEDDING_MODEL", "text-embedding-embeddinggemma-300m"
-        )
-        embedding_provider = config.get("EMBEDDING_PROVIDER", "LMStudio")
-        embedding_base_url = config.get("EMBEDDING_BASE_URL", "http://localhost:1234")
-        llm_model = config.get("LLM_MODEL", "gpt-4o-mini")
+        config = get_lightrag_core_settings()
 
         try:
             core = LightRAGCore(
-                embedding_model=embedding_model,
-                embedding_provider=embedding_provider,
-                embedding_base_url=embedding_base_url,
-                llm_model=llm_model,
+                embedding_model=config["EMBEDDING_MODEL"],
+                embedding_provider=config["EMBEDDING_PROVIDER"],
+                embedding_base_url=config["EMBEDDING_BASE_URL"],
+                llm_model=config["LLM_MODEL"],
             )
             try:
                 result = core.query(query_text, param)
@@ -116,4 +109,4 @@ class Command(BaseCommand):
             finally:
                 core.close()
         except Exception as e:
-            raise CommandError(f"Failed to query system: {e}")
+            raise CommandError(f"Failed to query system: {e}") from e

@@ -21,6 +21,8 @@ except ImportError:
 
 from django.conf import settings
 
+from .config import get_ladybug_settings
+
 
 class LadybugGraphStorage:
     """LadybugDB implementation for graph storage"""
@@ -32,11 +34,12 @@ class LadybugGraphStorage:
 
     def _get_db_path(self) -> str:
         """Get the database path"""
-        ladybug_settings = getattr(settings, "LADYBUGDB", {})
-        base_path = Path(ladybug_settings.get("DATABASE_PATH", "ladybugdb.lbug"))
+        ladybug_settings = get_ladybug_settings()
 
         if ladybug_settings.get("IN_MEMORY", False):
             return ":memory:"
+
+        base_path = Path(ladybug_settings["DATABASE_PATH"])
 
         # Use single database file
         return str(base_path)
@@ -53,7 +56,7 @@ class LadybugGraphStorage:
             self.conn = lb.Connection(db)
             self._create_schema()
         except Exception as e:
-            raise RuntimeError(f"Failed to initialize LadybugDB connection: {e}")
+            raise RuntimeError(f"Failed to initialize LadybugDB connection: {e}") from e
 
     def _create_schema(self):
         """Create the graph schema if it doesn't exist"""
@@ -140,7 +143,7 @@ class LadybugGraphStorage:
             self.conn.execute(query)
             return entity_id
         except Exception as e:
-            raise RuntimeError(f"Failed to add entity: {e}")
+            raise RuntimeError(f"Failed to add entity: {e}") from e
 
     def upsert_entity_node(self, entity_data: dict[str, Any]) -> str:
         entity_id = entity_data["id"]
@@ -179,7 +182,7 @@ class LadybugGraphStorage:
             self.conn.execute(query)
             return relation_id
         except Exception as e:
-            raise RuntimeError(f"Failed to add relation: {e}")
+            raise RuntimeError(f"Failed to add relation: {e}") from e
 
     def upsert_relation_edge(self, relation_data: dict[str, Any]) -> str:
         source_ref = relation_data["source_entity"]
@@ -234,7 +237,7 @@ class LadybugGraphStorage:
                 }
             return None
         except Exception as e:
-            raise RuntimeError(f"Failed to get entity: {e}")
+            raise RuntimeError(f"Failed to get entity: {e}") from e
 
     def get_relation(self, source_id: str, target_id: str) -> dict[str, Any] | None:
         """Get a relation by source and target entity IDs"""
@@ -264,7 +267,7 @@ class LadybugGraphStorage:
                 }
             return None
         except Exception as e:
-            raise RuntimeError(f"Failed to get relation: {e}")
+            raise RuntimeError(f"Failed to get relation: {e}") from e
 
     def get_all_entities(self, limit: int | None = None) -> list[dict[str, Any]]:
         """Get all entities"""
@@ -293,7 +296,7 @@ class LadybugGraphStorage:
                 )
             return entities
         except Exception as e:
-            raise RuntimeError(f"Failed to get all entities: {e}")
+            raise RuntimeError(f"Failed to get all entities: {e}") from e
 
     def get_all_relations(self, limit: int | None = None) -> list[dict[str, Any]]:
         """Get all relations"""
@@ -328,7 +331,7 @@ class LadybugGraphStorage:
                 )
             return relations
         except Exception as e:
-            raise RuntimeError(f"Failed to get all relations: {e}")
+            raise RuntimeError(f"Failed to get all relations: {e}") from e
 
     def get_entity_neighbors(
         self, entity_id: str, direction: str = "both"
@@ -380,7 +383,7 @@ class LadybugGraphStorage:
                     )
             return neighbors
         except Exception as e:
-            raise RuntimeError(f"Failed to get entity neighbors: {e}")
+            raise RuntimeError(f"Failed to get entity neighbors: {e}") from e
 
     def delete_entity(self, entity_id: str) -> bool:
         """Delete an entity and its relations"""
@@ -391,7 +394,7 @@ class LadybugGraphStorage:
 
             return True
         except Exception as e:
-            raise RuntimeError(f"Failed to delete entity: {e}")
+            raise RuntimeError(f"Failed to delete entity: {e}") from e
 
     def remove_entity_node(self, entity_id: str) -> bool:
         return self.delete_entity(entity_id)
@@ -408,7 +411,7 @@ class LadybugGraphStorage:
 
             return True
         except Exception as e:
-            raise RuntimeError(f"Failed to delete relation: {e}")
+            raise RuntimeError(f"Failed to delete relation: {e}") from e
 
     def remove_relation_edge(self, source_id: str, target_id: str) -> bool:
         return self.delete_relation(source_id, target_id)
@@ -416,10 +419,7 @@ class LadybugGraphStorage:
     def close(self):
         """Close the database connection"""
         if self.conn:
-            try:
-                self.conn.close()
-            except:
-                pass
+            self.conn.close()
 
 
 class ChromaVectorStorage:
@@ -452,7 +452,7 @@ class ChromaVectorStorage:
 
             self._initialize_collections()
         except Exception as e:
-            raise RuntimeError(f"Failed to initialize ChromaDB client: {e}")
+            raise RuntimeError(f"Failed to initialize ChromaDB client: {e}") from e
 
     def _initialize_collections(self):
         """Initialize collections for different vector types"""
@@ -469,7 +469,9 @@ class ChromaVectorStorage:
                 )
                 self.collections[vector_type] = collection
             except Exception as e:
-                raise RuntimeError(f"Failed to initialize collection {name}: {e}")
+                raise RuntimeError(
+                    f"Failed to initialize collection {name}: {e}"
+                ) from e
 
     def add_embedding(
         self,
@@ -493,12 +495,12 @@ class ChromaVectorStorage:
         )
 
         try:
-            result = collection.add(
+            collection.add(
                 embeddings=[embedding], ids=[content_id], metadatas=[metadata]
             )
             return content_id
         except Exception as e:
-            raise RuntimeError(f"Failed to add embedding: {e}")
+            raise RuntimeError(f"Failed to add embedding: {e}") from e
 
     def upsert_embedding(
         self,
@@ -527,7 +529,7 @@ class ChromaVectorStorage:
             )
             return content_id
         except Exception as e:
-            raise RuntimeError(f"Failed to upsert embedding: {e}")
+            raise RuntimeError(f"Failed to upsert embedding: {e}") from e
 
     def get_embedding(self, vector_type: str, content_id: str) -> list[float] | None:
         """Get a vector embedding by ID"""
@@ -542,7 +544,7 @@ class ChromaVectorStorage:
                 return result["embeddings"][0]
             return None
         except Exception as e:
-            raise RuntimeError(f"Failed to get embedding: {e}")
+            raise RuntimeError(f"Failed to get embedding: {e}") from e
 
     def search_similar(
         self,
@@ -584,7 +586,7 @@ class ChromaVectorStorage:
 
             return similar_items
         except Exception as e:
-            raise RuntimeError(f"Failed to search similar vectors: {e}")
+            raise RuntimeError(f"Failed to search similar vectors: {e}") from e
 
     def delete_embedding(self, vector_type: str, content_id: str) -> bool:
         """Delete a vector embedding"""
@@ -597,7 +599,7 @@ class ChromaVectorStorage:
             collection.delete(ids=[content_id])
             return True
         except Exception as e:
-            raise RuntimeError(f"Failed to delete embedding: {e}")
+            raise RuntimeError(f"Failed to delete embedding: {e}") from e
 
     def update_embedding(
         self,
@@ -611,10 +613,4 @@ class ChromaVectorStorage:
         return True
 
     def close(self):
-        """Close the ChromaDB client"""
-        if self.client:
-            try:
-                # ChromaDB doesn't have explicit close method for persistent client
-                pass
-            except:
-                pass
+        """No close for ChromaDB"""

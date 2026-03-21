@@ -24,3 +24,5 @@ coverage.xml
 djangorag.egg-info/
 django_lightrag.egg-info/
 dist/
+build/
+.env

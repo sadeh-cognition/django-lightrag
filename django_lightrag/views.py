@@ -1,9 +1,9 @@
 """Django API views for LightRAG using django-ninja."""
 
-from django.conf import settings
 from django.utils.module_loading import import_string
 from ninja import Router
 
+from .config import get_lightrag_core_settings, get_lightrag_settings
 from .core import LightRAGCore, QueryParam
 from .models import Entity, Relation
 from .schemas import (
@@ -36,20 +36,15 @@ def build_lightrag_core(
 
 
 def create_lightrag_core():
-    config = getattr(settings, "LIGHTRAG", {})
-    embedding_model = config.get(
-        "EMBEDDING_MODEL", "text-embedding-embeddinggemma-300m"
-    )
-    embedding_provider = config.get("EMBEDDING_PROVIDER", "LMStudio")
-    embedding_base_url = config.get("EMBEDDING_BASE_URL", "http://localhost:1234")
-    llm_model = config.get("LLM_MODEL", "gpt-4o-mini")
+    config = get_lightrag_settings()
+    core_config = get_lightrag_core_settings()
     factory_path = config.get("CORE_FACTORY")
     factory = import_string(factory_path) if factory_path else build_lightrag_core
     return factory(
-        embedding_model=embedding_model,
-        embedding_provider=embedding_provider,
-        embedding_base_url=embedding_base_url,
-        llm_model=llm_model,
+        embedding_model=core_config["EMBEDDING_MODEL"],
+        embedding_provider=core_config["EMBEDDING_PROVIDER"],
+        embedding_base_url=core_config["EMBEDDING_BASE_URL"],
+        llm_model=core_config["LLM_MODEL"],
     )
 
 

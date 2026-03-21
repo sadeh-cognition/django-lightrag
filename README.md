@@ -32,7 +32,8 @@ Notes:
 - `embed-gen` is referenced as a local path dependency in `pyproject.toml`. If you do not have it at that path, update the dependency or install it separately.
 
 ## Configure
-Set these in your Django settings (environment variables are supported for LightRAG):
+Set `LIGHTRAG` in your Django settings. The setting is mandatory and must
+include the required keys shown below:
 
 ```python
 # settings.py
@@ -46,18 +47,18 @@ LIGHTRAG = {
     "EMBEDDING_PROVIDER": "LMStudio",
     "EMBEDDING_MODEL": "text-embedding-embeddinggemma-300m",
     "EMBEDDING_BASE_URL": "http://localhost:1234",
-    # LLM settings for entity + relation extraction
     "LLM_MODEL": "gpt-4o-mini",
+    # Optional LLM settings for entity + relation extraction
     "LLM_TEMPERATURE": 0.0,
 }
 
-# Optional storage settings
+# Mandatory storage settings
 CHROMADB_IN_MEMORY = False
 CHROMADB_DIR = "chromadb_storage"  # required when not in-memory
 
 LADYBUGDB = {
-    "DATABASE_PATH": "ladybugdb.lbug",
     "IN_MEMORY": False,
+    "DATABASE_PATH": "ladybugdb.lbug",  # required when IN_MEMORY is false
 }
 ```
 

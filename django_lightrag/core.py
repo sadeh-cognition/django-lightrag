@@ -3,7 +3,6 @@ import time
 from typing import Any
 
 import requests
-from django.conf import settings
 from django.db import transaction
 
 try:
@@ -11,6 +10,7 @@ try:
 except ImportError:
     generate_embeddings = None
 
+from .config import get_lightrag_settings
 from .deduplication import DeduplicationResult, GraphDeduplicationService
 from .entity_extraction import DEFAULT_ENTITY_TYPES, DEFAULT_SUMMARY_LANGUAGE
 from .graph_builder import KnowledgeGraphBuilder
@@ -41,8 +41,7 @@ class LightRAGCore:
         tokenizer: Tokenizer | None = None,
         query_keyword_extractor: QueryKeywordExtractor | None = None,
     ):
-        # Load configuration from settings
-        self.config = getattr(settings, "LIGHTRAG", {})
+        self.config = get_lightrag_settings()
 
         self.tokenizer = tokenizer or Tokenizer()
         self.llm_service = llm_service or LLMService(
