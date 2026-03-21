@@ -2,7 +2,9 @@ import hashlib
 import time
 from typing import Any
 
+import requests
 from django.conf import settings
+from django.db import transaction
 
 try:
     from embed_gen.generator import generate_embeddings
@@ -118,39 +120,40 @@ class LightRAGCore:
         document_id = self._generate_id(content)
         metadata = metadata or {}
 
-        # 1. Create document record
-        document = Document.objects.create(
-            id=document_id,
-            content=content,
-            metadata=metadata,
-            track_id=track_id,
-        )
-
         try:
-            # 2. Extract KG and persist
-            entities, relations = self.graph_builder.extract_and_persist(document)
+            with transaction.atomic():
+                # 1. Create document record
+                document = Document.objects.create(
+                    id=document_id,
+                    content=content,
+                    metadata=metadata,
+                    track_id=track_id,
+                )
 
-            # 3. Deduplicate touched records before profiling and vector upserts
-            dedup_result = self._deduplicate_graph_records(
-                include_entities=True,
-                include_relations=True,
-                entity_ids=[entity.id for entity in entities],
-                relation_ids=[relation.id for relation in relations],
-                profile_survivors=False,
-            )
+                # 2. Extract KG and persist
+                entities, relations = self.graph_builder.extract_and_persist(document)
 
-            # 4. Generate entity and relation profiles plus vector entries
-            self._profile_knowledge_graph(
-                dedup_result.surviving_entities or entities,
-                dedup_result.surviving_relations or relations,
-            )
+                # 3. Deduplicate touched records before profiling and vector upserts
+                dedup_result = self._deduplicate_graph_records(
+                    include_entities=True,
+                    include_relations=True,
+                    entity_ids=[entity.id for entity in entities],
+                    relation_ids=[relation.id for relation in relations],
+                    profile_survivors=False,
+                )
 
-            # 5. Generate and store document embeddings
-            self._generate_document_embeddings(document)
+                # 4. Generate entity and relation profiles plus vector entries
+                self._profile_knowledge_graph(
+                    dedup_result.surviving_entities or entities,
+                    dedup_result.surviving_relations or relations,
+                )
+
+                # 5. Generate and store document embeddings
+                self._generate_document_embeddings(document)
 
             return document_id
         except Exception:
-            # Clean up if needed (original implementation didn't, but we could)
+            Document.objects.filter(id=document_id).delete()
             raise
 
     def query(self, query_text: str, param: QueryParam = None) -> QueryResult:
@@ -414,20 +417,39 @@ class LightRAGCore:
     def _get_embeddings(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             raise ValueError("No texts provided for embedding generation.")
-        if generate_embeddings is None:
-            raise RuntimeError(
-                "embed_gen is not installed. Install embed_gen to generate embeddings."
-            )
 
         try:
-            return generate_embeddings(
-                texts=texts,
-                model_name=self.embedding_model,
-                provider=self.embedding_provider,
-                base_url=self.embedding_base_url,
-            )
+            if generate_embeddings is not None:
+                return generate_embeddings(
+                    texts=texts,
+                    model_name=self.embedding_model,
+                    provider=self.embedding_provider,
+                    base_url=self.embedding_base_url,
+                )
+            return self._get_embeddings_via_http(texts)
         except Exception as exc:
             raise RuntimeError(f"Failed to generate embeddings: {exc}") from exc
+
+    def _get_embeddings_via_http(self, texts: list[str]) -> list[list[float]]:
+        endpoint = f"{self.embedding_base_url.rstrip('/')}/embeddings"
+        response = requests.post(
+            endpoint,
+            json={"model": self.embedding_model, "input": texts},
+            timeout=60,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        data = payload.get("data")
+        if not isinstance(data, list):
+            raise RuntimeError("Embedding response missing 'data' list.")
+
+        try:
+            ordered_rows = sorted(data, key=lambda item: item.get("index", 0))
+            return [row["embedding"] for row in ordered_rows]
+        except Exception as exc:
+            raise RuntimeError(
+                "Embedding response missing expected 'embedding' values."
+            ) from exc
 
     def _generate_document_embeddings(self, document: Document):
         embedding = self._get_embeddings([document.content])[0]
@@ -605,7 +627,6 @@ class LightRAGCore:
             result.append(
                 {
                     "id": doc.id,
-                    "title": doc.title,
                     "track_id": doc.track_id,
                     "created_at": doc.created_at.isoformat(),
                     "updated_at": doc.updated_at.isoformat(),

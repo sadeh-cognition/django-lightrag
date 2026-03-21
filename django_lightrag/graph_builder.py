@@ -43,6 +43,19 @@ class KnowledgeGraphBuilder:
     def _extract_knowledge_graph(
         self, document: Document
     ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+        def llm_model_func(
+            user_prompt: str,
+            system_prompt: str | None = None,
+            history_messages: list[dict[str, str]] | None = None,
+            max_tokens: int | None = None,
+        ) -> str:
+            return self.llm_service.call_llm(
+                user_prompt=user_prompt,
+                system_prompt=system_prompt,
+                history_messages=history_messages,
+                max_tokens=max_tokens,
+            )
+
         document_payload = {
             document.id: {
                 "tokens": self.tokenizer.count_tokens(document.content),
@@ -53,13 +66,7 @@ class KnowledgeGraphBuilder:
         }
 
         global_config = {
-            "llm_model_func": (
-                lambda user_prompt, system_prompt=None, history_messages=None, max_tokens=None: (
-                    self.llm_service.call_llm(
-                        user_prompt, system_prompt, history_messages, max_tokens
-                    )
-                )
-            ),
+            "llm_model_func": llm_model_func,
             "entity_extract_max_gleaning": self.config.get(
                 "ENTITY_EXTRACT_MAX_GLEANING", 1
             ),

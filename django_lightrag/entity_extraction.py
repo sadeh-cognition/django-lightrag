@@ -446,7 +446,7 @@ def create_prefixed_exception(original_exception: Exception, prefix: str) -> Exc
 
 def use_llm_func(
     user_prompt: str,
-    use_llm_func: Callable[..., Any],
+    llm_callable: Callable[..., Any],
     system_prompt: str | None = None,
     max_tokens: int = None,
     history_messages: list[dict[str, str]] = None,
@@ -472,7 +472,11 @@ def use_llm_func(
         kwargs["max_tokens"] = max_tokens
 
     try:
-        res = use_llm_func(safe_user_prompt, system_prompt=safe_system_prompt, **kwargs)
+        res = llm_callable(
+            safe_user_prompt,
+            system_prompt=safe_system_prompt,
+            **kwargs,
+        )
     except Exception as e:
         error_msg = f"[LLM func] {str(e)}"
         raise type(e)(error_msg) from e
@@ -797,7 +801,7 @@ def extract_entities(
                     "User cancelled during entity extraction"
                 )
 
-    use_llm_func: callable = global_config["llm_model_func"]
+    llm_callable: callable = global_config["llm_model_func"]
     entity_extract_max_gleaning = global_config["entity_extract_max_gleaning"]
 
     ordered_documents = list(documents.items())
@@ -857,7 +861,7 @@ def extract_entities(
 
         final_result = use_llm_func(
             entity_extraction_user_prompt,
-            use_llm_func,
+            llm_callable,
             system_prompt=entity_extraction_system_prompt,
         )
         timestamp = int(time.time())
@@ -899,7 +903,7 @@ def extract_entities(
             else:
                 glean_result = use_llm_func(
                     entity_continue_extraction_user_prompt,
-                    use_llm_func,
+                    llm_callable,
                     system_prompt=entity_extraction_system_prompt,
                     history_messages=history,
                 )

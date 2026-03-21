@@ -1,12 +1,6 @@
-try:
-    from django_llm_chat.chat import Chat, DuplicateSystemMessageError
-    from django_llm_chat.models import Message
-except ImportError:
-    Chat = None
-    Message = None
-
-    class DuplicateSystemMessageError(Exception):
-        pass
+from django_llm_chat.chat import Chat
+from django_llm_chat.models import Project
+from django.contrib.auth import get_user_model
 
 
 class LLMService:
@@ -15,56 +9,31 @@ class LLMService:
     def __init__(self, model: str, temperature: float = 0.0):
         self.model = model
         self.temperature = temperature
+        User = get_user_model()
+        self.user, _ = User.objects.get_or_create(username="lightrag_django")
+        self.project, _ = Project.objects.get_or_create(name="lightrag_django")
 
     def call_llm(
         self,
         user_prompt: str,
         system_prompt: str | None = None,
-        history_messages: list[dict[str, str]] | None = None,
         max_tokens: int | None = None,
         temperature: float | None = None,
     ) -> str:
         """
         Adapter for LLM completion using django-llm-chat.
         """
-        if Chat is None or Message is None:
-            raise RuntimeError(
-                "django-llm-chat is not installed. Install django-llm-chat to use LLMService."
-            )
-
-        chat = Chat.create()
+        chat = Chat.create(project=self.project)
 
         if system_prompt:
-            try:
-                chat.create_system_message(system_prompt)
-            except DuplicateSystemMessageError:
-                pass
+            chat.create_system_message(system_prompt, user=self.user)
 
-        if history_messages:
-            for msg in history_messages:
-                role = (msg.get("role") or msg.get("type") or "user").lower()
-                content = msg.get("content", "")
-                if not content:
-                    continue
-                if role == "system":
-                    try:
-                        chat.create_system_message(content)
-                    except DuplicateSystemMessageError:
-                        continue
-                elif role == "assistant":
-                    Message.create_llm_message(
-                        chat=chat.chat_db_model,
-                        text=content,
-                        user=chat.llm_user,
-                    )
-                else:
-                    chat.create_user_message(content)
-
-        llm_msg, _, _ = chat.send_user_msg_to_llm(
-            self.model,
-            user_prompt,
+        chat.call_llm(
+            model_name=self.model,
+            message=user_prompt,
+            user=self.user,
             include_chat_history=True,
             temperature=temperature if temperature is not None else self.temperature,
             max_tokens=max_tokens,
         )
-        return llm_msg.text or ""
+        return chat.last_llm_message.text if chat.last_llm_message else ""

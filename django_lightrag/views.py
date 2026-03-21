@@ -5,6 +5,7 @@ from django.utils.module_loading import import_string
 from ninja import Router
 
 from .core import LightRAGCore, QueryParam
+from .models import Entity, Relation
 from .schemas import (
     DocumentIngestSchema,
     DocumentSchema,
@@ -146,13 +147,22 @@ def delete_document(request, document_id: str):
 def list_entities(request, limit: int | None = None):
     """List entities in the system"""
     try:
-        core = create_lightrag_core()
-        try:
-            # Get entities from graph storage
-            entities = core.graph_storage.get_all_entities(limit)
-            return [EntitySchema(**entity) for entity in entities]
-        finally:
-            core.graph_storage.close()
+        queryset = Entity.objects.order_by("created_at")
+        if limit is not None:
+            queryset = queryset[:limit]
+        return [
+            EntitySchema(
+                id=entity.id,
+                name=entity.name,
+                entity_type=entity.entity_type,
+                description=entity.description,
+                source_ids=entity.source_ids,
+                metadata=entity.metadata,
+                created_at=entity.created_at.isoformat(),
+                updated_at=entity.updated_at.isoformat(),
+            )
+            for entity in queryset
+        ]
 
     except Exception as e:
         return 400, {"error": "list_failed", "message": str(e)}
@@ -164,13 +174,26 @@ def list_entities(request, limit: int | None = None):
 def list_relations(request, limit: int | None = None):
     """List relations in the system"""
     try:
-        core = create_lightrag_core()
-        try:
-            # Get relations from graph storage
-            relations = core.graph_storage.get_all_relations(limit)
-            return [RelationSchema(**relation) for relation in relations]
-        finally:
-            core.graph_storage.close()
+        queryset = Relation.objects.select_related(
+            "source_entity", "target_entity"
+        ).order_by("created_at")
+        if limit is not None:
+            queryset = queryset[:limit]
+        return [
+            RelationSchema(
+                id=relation.id,
+                source_entity=relation.source_entity_id,
+                target_entity=relation.target_entity_id,
+                relation_type=relation.relation_type,
+                description=relation.description,
+                source_ids=relation.source_ids,
+                weight=relation.weight,
+                metadata=relation.metadata,
+                created_at=relation.created_at.isoformat(),
+                updated_at=relation.updated_at.isoformat(),
+            )
+            for relation in queryset
+        ]
 
     except Exception as e:
         return 400, {"error": "list_failed", "message": str(e)}
