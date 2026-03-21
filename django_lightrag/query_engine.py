@@ -41,41 +41,50 @@ class QueryEngine:
             documents_by_id[doc_id] for doc_id in doc_ids if doc_id in documents_by_id
         ]
 
-    def retrieve_knowledge_graph(
+    def retrieve_entities(
         self, query_embedding: list[float], top_k: int
-    ) -> tuple[list[Entity], list[Relation]]:
-        """Retrieve relevant entities and relations"""
+    ) -> list[Entity]:
         entity_results = self.vector_storage.search_similar(
             "entity", query_embedding, top_k=top_k
         )
-        relation_results = self.vector_storage.search_similar(
-            "relation", query_embedding, top_k=top_k
-        )
-
         entity_ids = [item["id"] for item in entity_results]
-        relation_ids = [item["id"] for item in relation_results]
-
         entities_by_id = {
             entity.id: entity for entity in Entity.objects.filter(id__in=entity_ids)
         }
+        return [
+            entities_by_id[entity_id]
+            for entity_id in entity_ids
+            if entity_id in entities_by_id
+        ]
+
+    def retrieve_relations(
+        self, query_embedding: list[float], top_k: int
+    ) -> list[Relation]:
+        relation_results = self.vector_storage.search_similar(
+            "relation", query_embedding, top_k=top_k
+        )
+        relation_ids = [item["id"] for item in relation_results]
         relations_by_id = {
             relation.id: relation
             for relation in Relation.objects.select_related(
                 "source_entity", "target_entity"
             ).filter(id__in=relation_ids)
         }
-
-        entities = [
-            entities_by_id[entity_id]
-            for entity_id in entity_ids
-            if entity_id in entities_by_id
-        ]
-        relations = [
+        return [
             relations_by_id[relation_id]
             for relation_id in relation_ids
             if relation_id in relations_by_id
         ]
-        return entities, relations
+
+    def merge_unique_records(self, records: list[Any]) -> list[Any]:
+        unique_records: list[Any] = []
+        seen_ids: set[str] = set()
+        for record in records:
+            if record.id in seen_ids:
+                continue
+            seen_ids.add(record.id)
+            unique_records.append(record)
+        return unique_records
 
     def build_context(
         self,
@@ -85,7 +94,16 @@ class QueryEngine:
         param: QueryParam,
     ) -> dict[str, Any]:
         """Build context for response generation"""
-        context = {"documents": [], "entities": [], "relations": [], "total_tokens": 0}
+        context = {
+            "documents": [],
+            "entities": [],
+            "relations": [],
+            "query_keywords": {
+                "low_level_keywords": list(param.low_level_keywords),
+                "high_level_keywords": list(param.high_level_keywords),
+            },
+            "total_tokens": 0,
+        }
 
         # Add documents
         for document in documents:

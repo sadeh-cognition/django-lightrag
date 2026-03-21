@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -11,6 +11,8 @@ class QueryParam:
     max_tokens: int = 4000
     temperature: float = 0.1
     stream: bool = False  # TODO: remove this option
+    low_level_keywords: list[str] = field(default_factory=list)
+    high_level_keywords: list[str] = field(default_factory=list)
 
 
 @dataclass

@@ -1,45 +1,64 @@
-"""
-Django API views for LightRAG using django-ninja.
-"""
+"""Django API views for LightRAG using django-ninja."""
 
-from typing import List, Dict, Optional
+from django.conf import settings
+from django.utils.module_loading import import_string
 from ninja import Router
 
 from .core import LightRAGCore, QueryParam
 from .schemas import (
     DocumentIngestSchema,
     DocumentSchema,
+    EntitySchema,
+    ErrorResponseSchema,
     QueryRequestSchema,
     QueryResultSchema,
-    EntitySchema,
     RelationSchema,
-    ErrorResponseSchema,
     SuccessResponseSchema,
 )
-from django.conf import settings
 
 router = Router()
 
 
+def build_lightrag_core(
+    *,
+    embedding_model: str,
+    embedding_provider: str,
+    embedding_base_url: str,
+    llm_model: str,
+):
+    return LightRAGCore(
+        embedding_model=embedding_model,
+        embedding_provider=embedding_provider,
+        embedding_base_url=embedding_base_url,
+        llm_model=llm_model,
+    )
+
+
+def create_lightrag_core():
+    config = getattr(settings, "LIGHTRAG", {})
+    embedding_model = config.get(
+        "EMBEDDING_MODEL", "text-embedding-embeddinggemma-300m"
+    )
+    embedding_provider = config.get("EMBEDDING_PROVIDER", "LMStudio")
+    embedding_base_url = config.get("EMBEDDING_BASE_URL", "http://localhost:1234")
+    llm_model = config.get("LLM_MODEL", "gpt-4o-mini")
+    factory_path = config.get("CORE_FACTORY")
+    factory = import_string(factory_path) if factory_path else build_lightrag_core
+    return factory(
+        embedding_model=embedding_model,
+        embedding_provider=embedding_provider,
+        embedding_base_url=embedding_base_url,
+        llm_model=llm_model,
+    )
+
+
 @router.post(
-    "/documents/ingest", response={201: Dict[str, str], 400: ErrorResponseSchema}
+    "/documents/ingest", response={201: dict[str, str], 400: ErrorResponseSchema}
 )
 def ingest_document(request, data: DocumentIngestSchema):
     """Ingest a document into the system"""
     try:
-        config = getattr(settings, "LIGHTRAG", {})
-        embedding_model = config.get(
-            "EMBEDDING_MODEL", "text-embedding-embeddinggemma-300m"
-        )
-        embedding_provider = config.get("EMBEDDING_PROVIDER", "LMStudio")
-        embedding_base_url = config.get("EMBEDDING_BASE_URL", "http://localhost:1234")
-        llm_model = config.get("LLM_MODEL", "gpt-4o-mini")
-        core = LightRAGCore(
-            embedding_model=embedding_model,
-            embedding_provider=embedding_provider,
-            embedding_base_url=embedding_base_url,
-            llm_model=llm_model,
-        )
+        core = create_lightrag_core()
         try:
             document_id = core.ingest_document(
                 content=data.content,
@@ -57,24 +76,12 @@ def ingest_document(request, data: DocumentIngestSchema):
 
 
 @router.get(
-    "/documents", response={200: List[DocumentSchema], 400: ErrorResponseSchema}
+    "/documents", response={200: list[DocumentSchema], 400: ErrorResponseSchema}
 )
 def list_documents(request):
     """List documents in the system"""
     try:
-        config = getattr(settings, "LIGHTRAG", {})
-        embedding_model = config.get(
-            "EMBEDDING_MODEL", "text-embedding-embeddinggemma-300m"
-        )
-        embedding_provider = config.get("EMBEDDING_PROVIDER", "LMStudio")
-        embedding_base_url = config.get("EMBEDDING_BASE_URL", "http://localhost:1234")
-        llm_model = config.get("LLM_MODEL", "gpt-4o-mini")
-        core = LightRAGCore(
-            embedding_model=embedding_model,
-            embedding_provider=embedding_provider,
-            embedding_base_url=embedding_base_url,
-            llm_model=llm_model,
-        )
+        core = create_lightrag_core()
         try:
             documents = core.list_documents()
             return [DocumentSchema(**doc) for doc in documents]
@@ -91,20 +98,7 @@ def query_rag(request, data: QueryRequestSchema):
         # Create query parameters
         param_data = data.param.dict() if data.param else {}
         param = QueryParam(**param_data)
-
-        config = getattr(settings, "LIGHTRAG", {})
-        embedding_model = config.get(
-            "EMBEDDING_MODEL", "text-embedding-embeddinggemma-300m"
-        )
-        embedding_provider = config.get("EMBEDDING_PROVIDER", "LMStudio")
-        embedding_base_url = config.get("EMBEDDING_BASE_URL", "http://localhost:1234")
-        llm_model = config.get("LLM_MODEL", "gpt-4o-mini")
-        core = LightRAGCore(
-            embedding_model=embedding_model,
-            embedding_provider=embedding_provider,
-            embedding_base_url=embedding_base_url,
-            llm_model=llm_model,
-        )
+        core = create_lightrag_core()
         try:
             result = core.query(data.query, param)
             return QueryResultSchema(
@@ -132,19 +126,7 @@ def query_rag(request, data: QueryRequestSchema):
 def delete_document(request, document_id: str):
     """Delete a document"""
     try:
-        config = getattr(settings, "LIGHTRAG", {})
-        embedding_model = config.get(
-            "EMBEDDING_MODEL", "text-embedding-embeddinggemma-300m"
-        )
-        embedding_provider = config.get("EMBEDDING_PROVIDER", "LMStudio")
-        embedding_base_url = config.get("EMBEDDING_BASE_URL", "http://localhost:1234")
-        llm_model = config.get("LLM_MODEL", "gpt-4o-mini")
-        core = LightRAGCore(
-            embedding_model=embedding_model,
-            embedding_provider=embedding_provider,
-            embedding_base_url=embedding_base_url,
-            llm_model=llm_model,
-        )
+        core = create_lightrag_core()
         try:
             success = core.delete_document(document_id)
             if not success:
@@ -160,23 +142,11 @@ def delete_document(request, document_id: str):
         return 400, {"error": "deletion_failed", "message": str(e)}
 
 
-@router.get("/entities", response={200: List[EntitySchema], 400: ErrorResponseSchema})
-def list_entities(request, limit: Optional[int] = None):
+@router.get("/entities", response={200: list[EntitySchema], 400: ErrorResponseSchema})
+def list_entities(request, limit: int | None = None):
     """List entities in the system"""
     try:
-        config = getattr(settings, "LIGHTRAG", {})
-        embedding_model = config.get(
-            "EMBEDDING_MODEL", "text-embedding-embeddinggemma-300m"
-        )
-        embedding_provider = config.get("EMBEDDING_PROVIDER", "LMStudio")
-        embedding_base_url = config.get("EMBEDDING_BASE_URL", "http://localhost:1234")
-        llm_model = config.get("LLM_MODEL", "gpt-4o-mini")
-        core = LightRAGCore(
-            embedding_model=embedding_model,
-            embedding_provider=embedding_provider,
-            embedding_base_url=embedding_base_url,
-            llm_model=llm_model,
-        )
+        core = create_lightrag_core()
         try:
             # Get entities from graph storage
             entities = core.graph_storage.get_all_entities(limit)
@@ -189,24 +159,12 @@ def list_entities(request, limit: Optional[int] = None):
 
 
 @router.get(
-    "/relations", response={200: List[RelationSchema], 400: ErrorResponseSchema}
+    "/relations", response={200: list[RelationSchema], 400: ErrorResponseSchema}
 )
-def list_relations(request, limit: Optional[int] = None):
+def list_relations(request, limit: int | None = None):
     """List relations in the system"""
     try:
-        config = getattr(settings, "LIGHTRAG", {})
-        embedding_model = config.get(
-            "EMBEDDING_MODEL", "text-embedding-embeddinggemma-300m"
-        )
-        embedding_provider = config.get("EMBEDDING_PROVIDER", "LMStudio")
-        embedding_base_url = config.get("EMBEDDING_BASE_URL", "http://localhost:1234")
-        llm_model = config.get("LLM_MODEL", "gpt-4o-mini")
-        core = LightRAGCore(
-            embedding_model=embedding_model,
-            embedding_provider=embedding_provider,
-            embedding_base_url=embedding_base_url,
-            llm_model=llm_model,
-        )
+        core = create_lightrag_core()
         try:
             # Get relations from graph storage
             relations = core.graph_storage.get_all_relations(limit)
@@ -218,7 +176,7 @@ def list_relations(request, limit: Optional[int] = None):
         return 400, {"error": "list_failed", "message": str(e)}
 
 
-@router.get("/health", response=Dict[str, str])
+@router.get("/health", response=dict[str, str])
 def health_check(request):
     """Health check endpoint"""
     return {"status": "healthy", "service": "lightrag-django"}

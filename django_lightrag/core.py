@@ -16,6 +16,7 @@ from .llm import LLMService
 from .models import Document, Entity, Relation
 from .profiling import ProfilingService
 from .query_engine import QueryEngine
+from .query_keywords import QueryKeywordExtractor, QueryKeywords
 from .storage import ChromaVectorStorage, LadybugGraphStorage
 from .types import QueryParam, QueryResult
 from .utils import Tokenizer
@@ -36,6 +37,7 @@ class LightRAGCore:
         graph_storage: LadybugGraphStorage | None = None,
         vector_storage: ChromaVectorStorage | None = None,
         tokenizer: Tokenizer | None = None,
+        query_keyword_extractor: QueryKeywordExtractor | None = None,
     ):
         # Load configuration from settings
         self.config = getattr(settings, "LIGHTRAG", {})
@@ -55,6 +57,14 @@ class LightRAGCore:
         self.profiling_service = ProfilingService(
             llm_service=self.llm_service,
             config={"PROFILE_MAX_TOKENS": self.config.get("PROFILE_MAX_TOKENS", 400)},
+        )
+        self.query_keyword_extractor = query_keyword_extractor or QueryKeywordExtractor(
+            llm_service=self.llm_service,
+            config={
+                "QUERY_KEYWORD_MAX_TOKENS": self.config.get(
+                    "QUERY_KEYWORD_MAX_TOKENS", 200
+                )
+            },
         )
         self.deduplication_service = GraphDeduplicationService(
             graph_storage=self.graph_storage,
@@ -147,18 +157,34 @@ class LightRAGCore:
         """Query the RAG system using the QueryEngine"""
         if param is None:
             param = QueryParam()
+        else:
+            param.low_level_keywords = self._normalize_keyword_values(
+                param.low_level_keywords
+            )
+            param.high_level_keywords = self._normalize_keyword_values(
+                param.high_level_keywords
+            )
 
         start_time = time.time()
+        extracted_keywords = self._resolve_query_keywords(query_text, param)
+        param.low_level_keywords = extracted_keywords.low_level_keywords
+        param.high_level_keywords = extracted_keywords.high_level_keywords
 
-        # 1. Generate query embedding
-        query_embedding = self._get_query_embedding(query_text)
+        # 1. Generate retrieval embeddings
+        document_query_embedding = self._get_query_embedding(query_text)
+        entity_query_embedding = self._get_query_embedding(
+            self._keyword_text_or_query(param.low_level_keywords, query_text)
+        )
+        relation_query_embedding = self._get_query_embedding(
+            self._keyword_text_or_query(param.high_level_keywords, query_text)
+        )
 
         # 2. Retrieval using QueryEngine
         relevant_documents = self.query_engine.retrieve_documents(
-            query_embedding, param.top_k
+            document_query_embedding, param.top_k
         )
-        relevant_entities, relevant_relations = (
-            self.query_engine.retrieve_knowledge_graph(query_embedding, param.top_k)
+        relevant_entities, relevant_relations = self._retrieve_knowledge_graph(
+            entity_query_embedding, relation_query_embedding, param
         )
 
         # 3. Build context and generate response
@@ -178,6 +204,83 @@ class LightRAGCore:
             query_time=query_time,
             tokens_used=self.tokenizer.count_tokens(response),
         )
+
+    def _retrieve_knowledge_graph(
+        self,
+        entity_query_embedding: list[float],
+        relation_query_embedding: list[float],
+        param: QueryParam,
+    ) -> tuple[list[Entity], list[Relation]]:
+        mode = param.mode.lower()
+        if mode == "local":
+            return (
+                self.query_engine.retrieve_entities(
+                    entity_query_embedding, param.top_k
+                ),
+                [],
+            )
+        if mode == "global":
+            return (
+                [],
+                self.query_engine.retrieve_relations(
+                    relation_query_embedding, param.top_k
+                ),
+            )
+
+        entities = self.query_engine.retrieve_entities(
+            entity_query_embedding, param.top_k
+        )
+        relations = self.query_engine.retrieve_relations(
+            relation_query_embedding, param.top_k
+        )
+        return (
+            self.query_engine.merge_unique_records(entities),
+            self.query_engine.merge_unique_records(relations),
+        )
+
+    def _resolve_query_keywords(
+        self, query_text: str, param: QueryParam
+    ) -> QueryKeywords:
+        provided_low = self._normalize_keyword_values(param.low_level_keywords)
+        provided_high = self._normalize_keyword_values(param.high_level_keywords)
+        if provided_low and provided_high:
+            return QueryKeywords(
+                low_level_keywords=provided_low,
+                high_level_keywords=provided_high,
+            )
+
+        extracted = QueryKeywords(low_level_keywords=[], high_level_keywords=[])
+        try:
+            extracted = self.query_keyword_extractor.extract(query_text)
+        except Exception:
+            extracted = QueryKeywords(low_level_keywords=[], high_level_keywords=[])
+
+        low_level_keywords = provided_low or extracted.low_level_keywords
+        high_level_keywords = provided_high or extracted.high_level_keywords
+
+        return QueryKeywords(
+            low_level_keywords=low_level_keywords,
+            high_level_keywords=high_level_keywords,
+        )
+
+    def _normalize_keyword_values(self, values: list[str] | None) -> list[str]:
+        if not values:
+            return []
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            keyword = " ".join(str(value).split()).strip()
+            if not keyword:
+                continue
+            marker = keyword.casefold()
+            if marker in seen:
+                continue
+            seen.add(marker)
+            normalized.append(keyword)
+        return normalized
+
+    def _keyword_text_or_query(self, keywords: list[str], query_text: str) -> str:
+        return ", ".join(keywords) if keywords else query_text
 
     def _get_query_embedding(self, query_text: str) -> list[float]:
         return self._get_embeddings([query_text])[0]

@@ -1,15 +1,15 @@
-"""
-Pydantic schemas for LightRAG API using django-ninja.
-"""
+"""Pydantic schemas for LightRAG API using django-ninja."""
 
-from typing import List, Dict, Any, Optional
+from typing import Any
+
 from ninja import Schema
+from pydantic import Field
 
 
 class DocumentIngestSchema(Schema):
     content: str
     track_id: str = ""
-    metadata: Dict[str, Any] = {}
+    metadata: dict[str, Any] = {}
 
 
 class DocumentSchema(Schema):
@@ -25,31 +25,33 @@ class QueryParamSchema(Schema):
     max_tokens: int = 4000
     temperature: float = 0.1
     stream: bool = False
+    low_level_keywords: list[str] = Field(default_factory=list)
+    high_level_keywords: list[str] = Field(default_factory=list)
 
 
 class QueryRequestSchema(Schema):
     query: str
-    param: Optional[QueryParamSchema] = None
+    param: QueryParamSchema | None = None
 
 
 class SourceSchema(Schema):
     type: str
     id: str
-    name: Optional[str] = None
-    content: Optional[str] = None
-    document_id: Optional[str] = None
-    document_title: Optional[str] = None
-    entity_type: Optional[str] = None
-    description: Optional[str] = None
-    source: Optional[str] = None
-    relation_type: Optional[str] = None
-    target: Optional[str] = None
+    name: str | None = None
+    content: str | None = None
+    document_id: str | None = None
+    document_title: str | None = None
+    entity_type: str | None = None
+    description: str | None = None
+    source: str | None = None
+    relation_type: str | None = None
+    target: str | None = None
 
 
 class QueryResultSchema(Schema):
     response: str
-    sources: List[SourceSchema]
-    context: Dict[str, Any]
+    sources: list[SourceSchema]
+    context: dict[str, Any]
     query_time: float
     tokens_used: int
 
@@ -59,8 +61,8 @@ class EntitySchema(Schema):
     name: str
     entity_type: str
     description: str
-    source_ids: List[str]
-    metadata: Dict[str, Any]
+    source_ids: list[str]
+    metadata: dict[str, Any]
     created_at: str
     updated_at: str
 
@@ -71,9 +73,9 @@ class RelationSchema(Schema):
     target_entity: str
     relation_type: str
     description: str
-    source_ids: List[str]
+    source_ids: list[str]
     weight: float
-    metadata: Dict[str, Any]
+    metadata: dict[str, Any]
     created_at: str
     updated_at: str
 
@@ -81,10 +83,10 @@ class RelationSchema(Schema):
 class ErrorResponseSchema(Schema):
     error: str
     message: str
-    details: Optional[Dict[str, Any]] = None
+    details: dict[str, Any] | None = None
 
 
 class SuccessResponseSchema(Schema):
     success: bool
     message: str
-    data: Optional[Dict[str, Any]] = None
+    data: dict[str, Any] | None = None
