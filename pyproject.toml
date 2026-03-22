@@ -39,6 +39,7 @@ dependencies = [
     "asyncio-throttle>=1.0.2",
     "pytest-django>=4.11.1",
     "django-llm-chat",
+    "embed-gen",
 ]
 
 [project.optional-dependencies]
@@ -82,6 +83,7 @@ markers = [
 
 [tool.uv.sources]
 django-llm-chat = { path = "../llm_chat", editable = true }
+embed-gen = { path = "../embed_gen", editable = true }
 
 [dependency-groups]
 dev = [

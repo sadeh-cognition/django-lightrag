@@ -1,8 +1,10 @@
 from typing import Any
 
 from django.db.models import Q
+from django.contrib.auth import get_user_model
+from django_llm_chat.chat import Chat
+from django_llm_chat.models import Project
 
-from .llm import LLMService
 from .models import Document, Entity, Relation
 from .storage import ChromaVectorStorage
 from .types import (
@@ -26,13 +28,15 @@ class QueryEngine:
 
     def __init__(
         self,
-        llm_service: LLMService,
+        model: str,
         vector_storage: ChromaVectorStorage,
         tokenizer: Any,
+        temperature: float = 0.0,
     ):
-        self.llm_service = llm_service
+        self.model = model
         self.vector_storage = vector_storage
         self.tokenizer = tokenizer
+        self.temperature = temperature
 
     def query(self, query_text: str, param: QueryParam) -> QueryResult:
         """Query the RAG system"""
@@ -308,11 +312,23 @@ Context:
         system_prompt = self.generate_system_prompt.format(context=aggregated_context)
 
         try:
-            return self.llm_service.call_llm(
-                user_prompt=query_text,
-                system_prompt=system_prompt,
-                temperature=param.temperature,
+            user, _ = get_user_model().objects.get_or_create(username="lightrag_django")
+            project, _ = Project.objects.get_or_create(name="lightrag_django")
+            chat = Chat.create(project=project)
+
+            chat.create_system_message(system_prompt, user=user)
+
+            chat.call_llm(
+                model_name=self.model,
+                message=query_text,
+                user=user,
+                include_chat_history=True,
+                temperature=param.temperature
+                if param.temperature is not None
+                else self.temperature,
+                use_cache=True,
             )
+            return chat.last_llm_message.text if chat.last_llm_message else ""
         except Exception:
             return self.GROUNDED_FALLBACK_RESPONSE
 

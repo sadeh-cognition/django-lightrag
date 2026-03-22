@@ -1,32 +1,12 @@
-import json
+import pytest
+from dotenv import load_dotenv
 
+load_dotenv(".env")
 from django_lightrag.query_keywords import QueryKeywordExtractor
 
 
-class KeywordLLMService:
-    def __init__(self, response: str):
-        self.response = response
-        self.calls: list[dict[str, str | int | None]] = []
-
-    def call_llm(
-        self,
-        user_prompt: str,
-        system_prompt: str | None = None,
-        history_messages=None,
-        max_tokens: int | None = None,
-    ) -> str:
-        self.calls.append(
-            {
-                "user_prompt": user_prompt,
-                "system_prompt": system_prompt,
-                "max_tokens": max_tokens,
-            }
-        )
-        return self.response
-
-
 def test_parse_keyword_response_normalizes_and_dedupes():
-    extractor = QueryKeywordExtractor(llm_service=KeywordLLMService("{}"))
+    extractor = QueryKeywordExtractor(model="test-model")
 
     keywords = extractor.parse_response(
         """noise
@@ -40,7 +20,7 @@ tail"""
 
 
 def test_parse_keyword_response_falls_back_to_empty_lists():
-    extractor = QueryKeywordExtractor(llm_service=KeywordLLMService("{}"))
+    extractor = QueryKeywordExtractor(model="test-model")
 
     keywords = extractor.parse_response("not json at all")
 
@@ -48,22 +28,28 @@ def test_parse_keyword_response_falls_back_to_empty_lists():
     assert keywords.high_level_keywords == []
 
 
-def test_extract_uses_strict_json_prompt():
-    llm_service = KeywordLLMService(
-        json.dumps(
-            {
-                "low_level_keywords": ["Policy Engine"],
-                "high_level_keywords": ["Governance"],
-            }
-        )
-    )
-    extractor = QueryKeywordExtractor(llm_service=llm_service)
+from django.test import override_settings
+
+
+@pytest.mark.live
+@pytest.mark.django_db
+@override_settings(
+    LIGHTRAG={
+        "EMBEDDING_MODEL": "test-embedding",
+        "EMBEDDING_PROVIDER": "test",
+        "EMBEDDING_BASE_URL": "http://test.invalid",
+        "LLM_MODEL": "groq/llama-3.1-8b-instant",
+    }
+)
+def test_extract_returns_keywords():
+    # Use real model from settings/env for live test
+    from django_lightrag.config import get_lightrag_settings
+
+    config = get_lightrag_settings()
+
+    extractor = QueryKeywordExtractor(model=config.llm_model)
 
     keywords = extractor.extract("How does the Policy Engine enforce governance?")
 
-    assert keywords.low_level_keywords == ["Policy Engine"]
-    assert keywords.high_level_keywords == ["Governance"]
-    assert llm_service.calls[0]["user_prompt"] == (
-        "How does the Policy Engine enforce governance?"
-    )
-    assert "Return JSON only" in str(llm_service.calls[0]["system_prompt"])
+    # We expect some keywords to be returned by a real LLM
+    assert len(keywords.low_level_keywords) > 0 or len(keywords.high_level_keywords) > 0

@@ -92,6 +92,8 @@ def test_live_end_to_end_cycle():
             "track_id": "test-track-1",
         },
     )
+    if ingest_response.status_code != 201:
+        print(f"INGESTION FAILED: {ingest_response.json()}")
     assert ingest_response.status_code == 201
     doc_id = ingest_response.json()["document_id"]
 

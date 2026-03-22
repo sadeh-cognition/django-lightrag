@@ -6,8 +6,11 @@ import logging
 import re
 import time
 from collections import defaultdict
-from collections.abc import Callable
-from typing import Any, Protocol, TypedDict
+from typing import Any, TypedDict
+
+from django.contrib.auth import get_user_model
+from django_llm_chat.chat import Chat
+from django_llm_chat.models import Project
 
 logger = logging.getLogger(__name__)
 
@@ -24,24 +27,6 @@ class DocumentSchema(TypedDict, total=False):
     content: str
     full_doc_id: str
     chunk_order_index: int
-
-
-class LLMCallable(Protocol):
-    def __call__(
-        self,
-        user_prompt: str,
-        system_prompt: str | None = None,
-        history_messages: list[dict[str, str]] | None = None,
-        max_tokens: int | None = None,
-    ) -> str: ...
-
-
-class BaseKVStorage(Protocol):
-    global_config: dict
-
-    def get_by_id(self, key: str) -> dict | None: ...
-
-    def upsert(self, items: dict[str, dict]) -> None: ...
 
 
 DEFAULT_SUMMARY_LANGUAGE = "English"
@@ -459,11 +444,11 @@ def create_prefixed_exception(original_exception: Exception, prefix: str) -> Exc
 
 def use_llm_func(
     user_prompt: str,
-    llm_callable: Callable[..., Any],
+    model_name: str,
     system_prompt: str | None = None,
     max_tokens: int = None,
     history_messages: list[dict[str, str]] = None,
-) -> str:
+) -> Chat:
     safe_user_prompt = sanitize_text_for_encoding(user_prompt)
     safe_system_prompt = (
         sanitize_text_for_encoding(system_prompt) if system_prompt else None
@@ -478,23 +463,32 @@ def use_llm_func(
                 safe_msg["content"] = sanitize_text_for_encoding(safe_msg["content"])
             safe_history_messages.append(safe_msg)
 
-    kwargs = {}
-    if safe_history_messages:
-        kwargs["history_messages"] = safe_history_messages
-    if max_tokens is not None:
-        kwargs["max_tokens"] = max_tokens
-
     try:
-        res = llm_callable(
-            safe_user_prompt,
-            system_prompt=safe_system_prompt,
-            **kwargs,
+        user, _ = get_user_model().objects.get_or_create(username="lightrag_django")
+        project, _ = Project.objects.get_or_create(name="lightrag_django")
+        chat = Chat.create(project=project)
+
+        if safe_system_prompt:
+            chat.create_system_message(safe_system_prompt, user=user)
+
+        chat.call_llm(
+            model_name=model_name,
+            message=safe_user_prompt,
+            user=user,
+            include_chat_history=True,
+            max_tokens=max_tokens,
+            use_cache=True,
         )
     except Exception as e:
         error_msg = f"[LLM func] {str(e)}"
         raise type(e)(error_msg) from e
 
-    return remove_think_tags(res)
+    return chat
+
+
+def get_chat_response_text(chat: Chat) -> str:
+    response_text = chat.last_llm_message.text if chat.last_llm_message else ""
+    return remove_think_tags(response_text)
 
 
 def _truncate_entity_identifier(
@@ -802,13 +796,13 @@ def _process_extraction_result(
 
 def extract_entities(
     documents: dict[str, DocumentSchema],
-    llm_callable: LLMCallable,
+    model_name: str,
     entity_extract_max_gleaning: int,
     language: str = DEFAULT_SUMMARY_LANGUAGE,
     entity_types: list[str] | None = None,
     tokenizer: Any | None = None,
     max_extract_input_tokens: int = 12000,
-    pipeline_status: dict = None,
+    pipeline_status: dict | None = None,
     pipeline_status_lock=None,
 ) -> list:
     # Check for cancellation at the start of entity extraction
@@ -856,7 +850,7 @@ def extract_entities(
         content = document_dp["content"]
 
         # Get initial extraction
-        # Format system prompt without input_text for each document (enables OpenAI prompt caching across documents)
+        # Format system prompt without input_text for each document (enables prompt caching across documents)
         entity_extraction_system_prompt = PROMPTS[
             "entity_extraction_system_prompt"
         ].format(**context_base)
@@ -868,18 +862,19 @@ def extract_entities(
             "entity_continue_extraction_user_prompt"
         ].format(**{**context_base, "input_text": content})
 
-        final_result = use_llm_func(
+        initial_chat = use_llm_func(
             entity_extraction_user_prompt,
-            llm_callable,
+            model_name=model_name,
             system_prompt=entity_extraction_system_prompt,
         )
+        final_result = get_chat_response_text(initial_chat)
         timestamp = int(time.time())
 
         history = pack_user_ass_to_openai_messages(
             entity_extraction_user_prompt, final_result
         )
 
-        # Process initial extraction with file path
+        # Process initial extraction
         maybe_nodes, maybe_edges = _process_extraction_result(
             final_result,
             document_key,
@@ -912,12 +907,13 @@ def extract_entities(
                     f"Gleaning stopped for document {document_key}: Input tokens ({token_count}) exceeded limit ({max_extract_input_tokens})."
                 )
             else:
-                glean_result = use_llm_func(
+                glean_chat = use_llm_func(
                     entity_continue_extraction_user_prompt,
-                    llm_callable,
+                    model_name=model_name,
                     system_prompt=entity_extraction_system_prompt,
                     history_messages=history,
                 )
+                glean_result = get_chat_response_text(glean_chat)
                 timestamp = int(time.time())
 
                 # Process gleaning result separately with file path

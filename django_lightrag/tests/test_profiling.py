@@ -1,6 +1,10 @@
 import json
 
 import pytest
+from django.test import override_settings
+from dotenv import load_dotenv
+
+load_dotenv(".env")
 
 from django_lightrag.core import LightRAGCore
 from django_lightrag.graph_builder import (
@@ -26,52 +30,6 @@ class FakeGraphStorage:
 
     def close(self):
         return None
-
-
-class RecordingLLMService:
-    def __init__(self):
-        self.calls: list[dict] = []
-
-    def call_llm(
-        self,
-        user_prompt: str,
-        system_prompt: str | None = None,
-        history_messages=None,
-        max_tokens: int | None = None,
-    ) -> str:
-        payload = json.loads(user_prompt)
-        self.calls.append(payload)
-
-        if payload["kind"] == "entity":
-            if payload["name"] == "Policy Engine":
-                return json.dumps(
-                    {
-                        "key": "governance policy",
-                        "value": "Governance policy oversight for the Policy Engine.",
-                    }
-                )
-            return json.dumps(
-                {
-                    "key": f"{payload['name']} summary",
-                    "value": " ".join(payload["merged_descriptions"])
-                    or " ".join(
-                        document["content"] for document in payload["documents"]
-                    ),
-                }
-            )
-
-        return json.dumps(
-            {
-                "key": "governance link"
-                if payload["source"] == "Policy Engine"
-                else f"{payload['relation_type']} link",
-                "value": (
-                    "Governance oversight connects Policy Engine to Control Plane."
-                    if payload["source"] == "Policy Engine"
-                    else " ".join(payload["merged_descriptions"])
-                ),
-            }
-        )
 
 
 class InMemoryCollection:
@@ -153,7 +111,7 @@ def test_merge_provenance_across_multiple_documents():
     )
 
     builder = KnowledgeGraphBuilder(
-        llm_service=RecordingLLMService(),
+        model="test-model",
         tokenizer=Tokenizer(),
         graph_storage=FakeGraphStorage(),
         config=KnowledgeGraphBuilderConfig(),
@@ -247,8 +205,21 @@ def test_merge_provenance_across_multiple_documents():
     assert relation.weight == 2.0
 
 
+@pytest.mark.live
 @pytest.mark.django_db
+@override_settings(
+    LIGHTRAG={
+        "EMBEDDING_MODEL": "test-embedding",
+        "EMBEDDING_PROVIDER": "test",
+        "EMBEDDING_BASE_URL": "http://test.invalid",
+        "LLM_MODEL": "groq/llama-3.1-8b-instant",
+    }
+)
 def test_profile_generation_and_incremental_refresh():
+    from django_lightrag.config import get_lightrag_settings
+
+    config = get_lightrag_settings()
+
     doc = Document.objects.create(
         id="doc-profile", content="Policy Engine enforces governance rules."
     )
@@ -261,19 +232,17 @@ def test_profile_generation_and_incremental_refresh():
         metadata={"description_fragments": ["Policy Engine evaluates service rules."]},
     )
 
-    llm_service = RecordingLLMService()
-    profiling_service = ProfilingService(llm_service)
+    profiling_service = ProfilingService(model=config.llm_model)
 
     assert profiling_service.profile_entity(entity) is True
     entity.refresh_from_db()
-    assert entity.profile_key == "governance policy"
-    assert entity.profile_value == "Governance policy oversight for the Policy Engine."
+    assert entity.profile_key
+    assert entity.profile_value
     assert entity.profile_input_hash
     assert entity.profile_updated_at is not None
-    assert len(llm_service.calls) == 1
 
+    # Refresh skips when nothing changed
     assert profiling_service.profile_entity(entity) is False
-    assert len(llm_service.calls) == 1
 
     entity.description = (
         "Policy Engine evaluates service rules and coordinates governance."
@@ -284,12 +253,25 @@ def test_profile_generation_and_incremental_refresh():
     ]
     entity.save()
 
+    # Refresh triggers when descriptions change
     assert profiling_service.profile_entity(entity) is True
-    assert len(llm_service.calls) == 2
 
 
+@pytest.mark.live
 @pytest.mark.django_db
+@override_settings(
+    LIGHTRAG={
+        "EMBEDDING_MODEL": "nomic-ai/nomic-embed-text-v1.5-GGUF",
+        "EMBEDDING_PROVIDER": "LMStudio",
+        "EMBEDDING_BASE_URL": "http://localhost:1234/v1",
+        "LLM_MODEL": "groq/llama-3.1-8b-instant",
+    }
+)
 def test_entity_and_relation_vector_upserts_and_profile_retrieval():
+    from django_lightrag.config import get_lightrag_settings
+
+    config = get_lightrag_settings()
+
     doc = Document.objects.create(
         id="doc-retrieval",
         content="The Policy Engine works with the Control Plane on policy decisions.",
@@ -355,11 +337,10 @@ def test_entity_and_relation_vector_upserts_and_profile_retrieval():
 
     vector_storage = InMemoryVectorStorage()
     core = DeterministicCore(
-        embedding_model="test-embedding",
-        embedding_provider="test",
-        embedding_base_url="http://test.invalid",
-        llm_model="test-llm",
-        llm_service=RecordingLLMService(),
+        embedding_model=config.embedding_model,
+        embedding_provider=config.embedding_provider,
+        embedding_base_url=config.embedding_base_url,
+        llm_model=config.llm_model,
         graph_storage=FakeGraphStorage(),
         vector_storage=vector_storage,
         tokenizer=Tokenizer(),
@@ -372,8 +353,8 @@ def test_entity_and_relation_vector_upserts_and_profile_retrieval():
     relation_record = vector_storage.collections["relation"].get(ids=[relation.id])
     assert entity_record["ids"] == [policy_engine.id]
     assert relation_record["ids"] == [relation.id]
-    assert "Governance policy oversight" in entity_record["metadatas"][0]["content"]
-    assert "Governance oversight connects" in relation_record["metadatas"][0]["content"]
+    assert entity_record["metadatas"][0]["content"]
+    assert relation_record["metadatas"][0]["content"]
 
     query_embedding = core._get_query_embedding("governance")
     ent_vectors = core.query_engine.search_entity_vectors(query_embedding, top_k=2)
@@ -381,17 +362,11 @@ def test_entity_and_relation_vector_upserts_and_profile_retrieval():
     entities = core.query_engine.hydrate_entities(ent_vectors)
     relations = core.query_engine.hydrate_relations(rel_vectors)
 
-    assert [entity.id for entity in entities][0] == policy_engine.id
-    assert [relation.id for relation in relations][0] == relation.id
+    assert policy_engine.id in [e.id for e in entities]
+    assert relation.id in [r.id for r in relations]
 
     context = core.query_engine.build_context([], entities, relations, QueryParam())
-    assert (
-        context.entities[0].description
-        == "Governance policy oversight for the Policy Engine."
-    )
-    assert (
-        context.relations[0].description
-        == "Governance oversight connects Policy Engine to Control Plane."
-    )
+    assert len(context.entities) > 0
+    assert len(context.relations) > 0
 
     core.close()

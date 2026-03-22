@@ -1,30 +1,6 @@
-import json
-
 from django_lightrag.core import LightRAGCore
 from django_lightrag.models import Document, Entity, Relation
 from django_lightrag.utils import Tokenizer
-
-
-class EndpointLLMService:
-    def call_llm(
-        self,
-        user_prompt: str,
-        system_prompt: str | None = None,
-        history_messages: list[dict[str, str]] | None = None,
-        max_tokens: int | None = None,
-        temperature: float | None = None,
-    ) -> str:
-        if (
-            system_prompt
-            and "Answer the user using only the provided context." in system_prompt
-        ):
-            return f"Generated answer for: {user_prompt}"
-        return json.dumps(
-            {
-                "low_level_keywords": ["Policy Engine"],
-                "high_level_keywords": ["governance"],
-            }
-        )
 
 
 class EndpointVectorStorage:
@@ -71,6 +47,8 @@ class EndpointGraphStorage:
 
 
 class EndpointCore(LightRAGCore):
+    """Core used for endpoint tests that need to avoid real external calls."""
+
     def _get_embeddings(self, texts: list[str]) -> list[list[float]]:
         embeddings: list[list[float]] = []
         for text in texts:

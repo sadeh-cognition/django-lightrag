@@ -25,12 +25,12 @@ class KnowledgeGraphBuilder:
 
     def __init__(
         self,
-        llm_service: Any,
+        model: str,
         tokenizer: Any,
         graph_storage: LadybugGraphStorage,
         config: KnowledgeGraphBuilderConfig | None = None,
     ):
-        self.llm_service = llm_service
+        self.model = model
         self.tokenizer = tokenizer
         self.graph_storage = graph_storage
         self.config = config or KnowledgeGraphBuilderConfig()
@@ -56,19 +56,6 @@ class KnowledgeGraphBuilder:
     def _extract_knowledge_graph(
         self, document: Document
     ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
-        def llm_model_func(
-            user_prompt: str,
-            system_prompt: str | None = None,
-            history_messages: list[dict[str, str]] | None = None,
-            max_tokens: int | None = None,
-        ) -> str:
-            return self.llm_service.call_llm(
-                user_prompt=user_prompt,
-                system_prompt=system_prompt,
-                history_messages=history_messages,
-                max_tokens=max_tokens,
-            )
-
         document_payload = {
             document.id: {
                 "tokens": self.tokenizer.count_tokens(document.content),
@@ -80,7 +67,7 @@ class KnowledgeGraphBuilder:
 
         document_results = extract_entities(
             document_payload,
-            llm_callable=llm_model_func,
+            model_name=self.model,
             entity_extract_max_gleaning=self.config.entity_extract_max_gleaning,
             language=self.config.extraction_language,
             entity_types=self.config.entity_types,

@@ -1,7 +1,9 @@
 import json
 import re
 from dataclasses import dataclass
-from typing import Any
+from django.contrib.auth import get_user_model
+from django_llm_chat.chat import Chat
+from django_llm_chat.models import Project
 
 KEYWORD_EXTRACTION_SYSTEM_PROMPT = """You extract retrieval keywords from a user query.
 
@@ -35,18 +37,26 @@ class QueryKeywords:
 
 
 class QueryKeywordExtractor:
-    def __init__(
-        self, llm_service: Any, config: QueryKeywordConfig | None = None
-    ) -> None:
-        self.llm_service = llm_service
+    def __init__(self, model: str, config: QueryKeywordConfig | None = None) -> None:
+        self.model = model
         self.config = config or QueryKeywordConfig()
 
     def extract(self, query_text: str) -> QueryKeywords:
-        response = self.llm_service.call_llm(
-            user_prompt=query_text,
-            system_prompt=KEYWORD_EXTRACTION_SYSTEM_PROMPT,
+        user, _ = get_user_model().objects.get_or_create(username="lightrag_django")
+        project, _ = Project.objects.get_or_create(name="lightrag_django")
+        chat = Chat.create(project=project)
+
+        chat.create_system_message(KEYWORD_EXTRACTION_SYSTEM_PROMPT, user=user)
+
+        chat.call_llm(
+            model_name=self.model,
+            message=query_text,
+            user=user,
+            include_chat_history=True,
             max_tokens=self.config.query_keyword_max_tokens,
+            use_cache=True,
         )
+        response = chat.last_llm_message.text if chat.last_llm_message else ""
         return self.parse_response(response)
 
     def parse_response(self, response: str) -> QueryKeywords:

@@ -10,7 +10,6 @@ from .config import LightRAGConfig, get_lightrag_settings
 from .deduplication import DeduplicationResult, GraphDeduplicationService
 from .entity_extraction import DEFAULT_ENTITY_TYPES, DEFAULT_SUMMARY_LANGUAGE
 from .graph_builder import KnowledgeGraphBuilder, KnowledgeGraphBuilderConfig
-from .llm import LLMService
 from .models import Document, Entity, Relation
 from .profiling import ProfilingConfig, ProfilingService
 from .query_engine import QueryEngine
@@ -43,7 +42,6 @@ class LightRAGCore:
         llm_model: str,
         llm_temperature: float | None = None,
         *,
-        llm_service: LLMService | None = None,
         graph_storage: LadybugGraphStorage | None = None,
         vector_storage: ChromaVectorStorage | None = None,
         tokenizer: Tokenizer | None = None,
@@ -52,23 +50,22 @@ class LightRAGCore:
         self.config: LightRAGConfig = get_lightrag_settings()
 
         self.tokenizer = tokenizer or Tokenizer()
-        self.llm_service = llm_service or LLMService(
-            model=llm_model,
-            temperature=(
-                llm_temperature
-                if llm_temperature is not None
-                else self.config.llm_temperature
-            ),
+        self.llm_model = llm_model
+        self.llm_temperature = (
+            llm_temperature
+            if llm_temperature is not None
+            else self.config.llm_temperature
         )
 
         self.graph_storage = graph_storage or LadybugGraphStorage()
         self.vector_storage = vector_storage or ChromaVectorStorage()
         self.profiling_service = ProfilingService(
-            llm_service=self.llm_service,
+            model=self.llm_model,
+            temperature=self.llm_temperature,
             config=ProfilingConfig(profile_max_tokens=self.config.profile_max_tokens),
         )
         self.query_keyword_extractor = query_keyword_extractor or QueryKeywordExtractor(
-            llm_service=self.llm_service,
+            model=self.llm_model,
             config=QueryKeywordConfig(
                 query_keyword_max_tokens=self.config.query_keyword_max_tokens
             ),
@@ -78,7 +75,7 @@ class LightRAGCore:
             vector_storage=self.vector_storage,
         )
         self.graph_builder = KnowledgeGraphBuilder(
-            llm_service=self.llm_service,
+            model=self.llm_model,
             tokenizer=self.tokenizer,
             graph_storage=self.graph_storage,
             config=KnowledgeGraphBuilderConfig(
@@ -91,7 +88,8 @@ class LightRAGCore:
             ),
         )
         self.query_engine = QueryEngine(
-            llm_service=self.llm_service,
+            model=self.llm_model,
+            temperature=self.llm_temperature,
             vector_storage=self.vector_storage,
             tokenizer=self.tokenizer,
         )
@@ -416,13 +414,18 @@ class LightRAGCore:
         if not texts:
             raise ValueError("No texts provided for embedding generation.")
 
+        # Normalize base_url to avoid double /v1 if using embed_gen which adds it
+        base_url = self.embedding_base_url.rstrip("/")
+        if base_url.endswith("/v1"):
+            base_url = base_url[:-3]
+
         try:
             if generate_embeddings is not None:
                 return generate_embeddings(
                     texts=texts,
                     model_name=self.embedding_model,
                     provider=self.embedding_provider,
-                    base_url=self.embedding_base_url,
+                    base_url=base_url,
                 )
             return self._get_embeddings_via_http(texts)
         except Exception as exc:

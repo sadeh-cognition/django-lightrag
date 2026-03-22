@@ -5,6 +5,9 @@ from hashlib import sha256
 from typing import Any
 
 from django.utils import timezone
+from django.contrib.auth import get_user_model
+from django_llm_chat.chat import Chat
+from django_llm_chat.models import Project
 
 from .models import Document, Entity, Relation
 
@@ -29,8 +32,14 @@ class ProfilingConfig:
 class ProfilingService:
     """Generate retrieval-oriented profiles for canonical entities and relations."""
 
-    def __init__(self, llm_service: Any, config: ProfilingConfig | None = None) -> None:
-        self.llm_service = llm_service
+    def __init__(
+        self,
+        model: str,
+        temperature: float = 0.0,
+        config: ProfilingConfig | None = None,
+    ) -> None:
+        self.model = model
+        self.temperature = temperature
         self.config = config or ProfilingConfig()
 
     def profile_entity(self, entity: Entity) -> bool:
@@ -139,11 +148,23 @@ class ProfilingService:
         fallback_key: str,
         fallback_value: str,
     ) -> tuple[str, str]:
-        response = self.llm_service.call_llm(
-            user_prompt=json.dumps(payload, ensure_ascii=False, indent=2),
-            system_prompt=PROFILE_SYSTEM_PROMPT,
+        user, _ = get_user_model().objects.get_or_create(username="lightrag_django")
+        project, _ = Project.objects.get_or_create(name="lightrag_django")
+        chat = Chat.create(project=project)
+
+        chat.create_system_message(PROFILE_SYSTEM_PROMPT, user=user)
+
+        chat.call_llm(
+            model_name=self.model,
+            message=json.dumps(payload, ensure_ascii=False, indent=2),
+            user=user,
+            include_chat_history=True,
+            temperature=self.temperature,
             max_tokens=self.config.profile_max_tokens,
+            use_cache=True,
         )
+        response = chat.last_llm_message.text if chat.last_llm_message else ""
+
         key, value = self._parse_profile_response(response)
         key = key or fallback_key
         value = value or fallback_value

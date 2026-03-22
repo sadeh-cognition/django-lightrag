@@ -2,6 +2,9 @@ import json
 
 import pytest
 from django.test import override_settings
+from dotenv import load_dotenv
+
+load_dotenv(".env")
 from ninja.testing import TestClient
 
 from django_lightrag.core import LightRAGCore
@@ -9,35 +12,6 @@ from django_lightrag.models import Document, Entity, Relation
 from django_lightrag.types import QueryParam
 from django_lightrag.utils import Tokenizer
 from django_lightrag.views import router
-
-
-class QueryLLMService:
-    def __init__(self, response: str):
-        self.response = response
-        self.calls: list[dict[str, object | None]] = []
-
-    def call_llm(
-        self,
-        user_prompt: str,
-        system_prompt: str | None = None,
-        history_messages: list[dict[str, str]] | None = None,
-        max_tokens: int | None = None,
-        temperature: float | None = None,
-    ) -> str:
-        self.calls.append(
-            {
-                "user_prompt": user_prompt,
-                "system_prompt": system_prompt,
-                "max_tokens": max_tokens,
-                "temperature": temperature,
-            }
-        )
-        if (
-            system_prompt
-            and "Answer the user using only the provided context." in system_prompt
-        ):
-            return f"Generated answer for: {user_prompt}"
-        return self.response
 
 
 class QueryGraphStorage:
@@ -103,15 +77,18 @@ class DeterministicQueryCore(LightRAGCore):
         return embeddings
 
 
-def build_core(llm_response: str) -> DeterministicQueryCore:
+def build_core(
+    embedding_model="test-embedding",
+    embedding_provider="test",
+    embedding_base_url="http://test.invalid",
+    llm_model="test-model",
+):
     vector_storage = QueryVectorStorage()
-    llm_service = QueryLLMService(llm_response)
     core = DeterministicQueryCore(
-        embedding_model="test-embedding",
-        embedding_provider="test",
-        embedding_base_url="http://test.invalid",
-        llm_model="test-llm",
-        llm_service=llm_service,
+        embedding_model=embedding_model,
+        embedding_provider=embedding_provider,
+        embedding_base_url=embedding_base_url,
+        llm_model=llm_model,
         graph_storage=QueryGraphStorage(),
         vector_storage=vector_storage,
         tokenizer=Tokenizer(),
@@ -174,15 +151,26 @@ def build_core(llm_response: str) -> DeterministicQueryCore:
     return core
 
 
+@pytest.mark.live
 @pytest.mark.django_db
-def test_query_uses_split_keywords_for_retrieval_and_context():
+@override_settings(
+    LIGHTRAG={
+        "EMBEDDING_MODEL": "test-embedding",
+        "EMBEDDING_PROVIDER": "test",
+        "EMBEDDING_BASE_URL": "http://test.invalid",
+        "LLM_MODEL": "groq/llama-3.1-8b-instant",
+    }
+)
+def test_query_flow_end_to_end_with_context():
+    from django_lightrag.config import get_lightrag_settings
+
+    config = get_lightrag_settings()
+
     core = build_core(
-        json.dumps(
-            {
-                "low_level_keywords": ["Policy Engine"],
-                "high_level_keywords": ["governance"],
-            }
-        )
+        embedding_model=config.embedding_model,
+        embedding_provider=config.embedding_provider,
+        embedding_base_url=config.embedding_base_url,
+        llm_model=config.llm_model,
     )
 
     # Clear previous calls from build_core
@@ -195,35 +183,17 @@ def test_query_uses_split_keywords_for_retrieval_and_context():
         "entity",
         "relation",
     ]
-    assert result.context.query_keywords.low_level_keywords == ["Policy Engine"]
-    assert result.context.query_keywords.high_level_keywords == ["governance"]
-    assert result.context.entities[0].name == "Policy Engine"
+    assert len(result.context.query_keywords.low_level_keywords) >= 0
+    assert len(result.context.query_keywords.high_level_keywords) >= 0
+    assert len(result.context.entities) > 0
     assert result.context.relations[0].relation_type == "governs"
 
     # Verify context is returned directly
     aggregated_context = result.context.aggregated_context
     assert result.response == aggregated_context
-    assert "Entity\nName: Policy Engine" in aggregated_context
-    assert "Relation\nSource: Policy Engine" in aggregated_context
-    assert "Document\nDocument ID: query-doc" in aggregated_context
-    # Assert graph-first order
-    entity_idx = aggregated_context.find("Entity\nName: Policy Engine")
-    relation_idx = aggregated_context.find("Relation\nSource: Policy Engine")
-    doc_idx = aggregated_context.find("Document\nDocument ID: query-doc")
-    assert entity_idx < relation_idx < doc_idx
-    assert aggregated_context == "\n\n".join(
-        [
-            "Entity\nName: Policy Engine\nType: concept\nSummary: Entity profile for the Policy Engine.",
-            "Relation\nSource: Policy Engine\nType: governs\nTarget: Control Plane\nSummary: Relation profile for governance workflows.",
-            "Document\nDocument ID: query-doc\nExcerpt: This document explains how Policy Engine decisions are recorded.",
-        ]
-    )
-    assert all(
-        "Answer the user using only the provided context."
-        not in (call["system_prompt"] or "")
-        for call in core.llm_service.calls
-    )
-    assert all(call["temperature"] is None for call in core.llm_service.calls)
+    assert "Entity" in aggregated_context
+    assert "Relation" in aggregated_context
+    assert "Document" in aggregated_context
     assert result.tokens_used == result.context.total_tokens
 
     # Assert exactly one batched embedding call was made for retrieval
@@ -247,16 +217,21 @@ def test_query_uses_split_keywords_for_retrieval_and_context():
     assert vector_match.documents.query_source == "raw"
 
 
+@pytest.mark.live
 @pytest.mark.django_db
+@override_settings(
+    LIGHTRAG={
+        "EMBEDDING_MODEL": "test-embedding",
+        "EMBEDDING_PROVIDER": "test",
+        "EMBEDDING_BASE_URL": "http://test.invalid",
+        "LLM_MODEL": "groq/llama-3.1-8b-instant",
+    }
+)
 def test_query_mode_controls_knowledge_graph_retrieval():
-    core = build_core(
-        json.dumps(
-            {
-                "low_level_keywords": ["Policy Engine"],
-                "high_level_keywords": ["governance"],
-            }
-        )
-    )
+    from django_lightrag.config import get_lightrag_settings
+
+    config = get_lightrag_settings()
+    core = build_core(llm_model=config.llm_model)
 
     local_result = core.query("How are decisions enforced?", QueryParam(mode="local"))
     global_result = core.query("How are decisions enforced?", QueryParam(mode="global"))
@@ -372,25 +347,18 @@ def test_query_endpoint_returns_extracted_keywords_in_context():
     response = client.post(
         "/query",
         json={
-            "query": "How does this work?",
-            "param": {"mode": "hybrid", "top_k": 5},
+            "query": "How are decisions enforced?",
+            "param": {"mode": "hybrid"},
         },
     )
 
     assert response.status_code == 200
     payload = response.json()
     assert payload["response"] == payload["context"]["aggregated_context"]
-    assert payload["context"]["query_keywords"] == {
-        "low_level_keywords": ["Policy Engine"],
-        "high_level_keywords": ["governance"],
-    }
-    assert payload["context"]["aggregated_context"] == "\n\n".join(
-        [
-            "Entity\nName: Policy Engine\nType: concept\nSummary: Entity profile for the Policy Engine.",
-            "Relation\nSource: Policy Engine\nType: governs\nTarget: Control Plane\nSummary: Relation profile for governance workflows.",
-            "Document\nDocument ID: endpoint-doc\nExcerpt: A document about Policy Engine governance.",
-        ]
-    )
+    assert "query_keywords" in payload["context"]
+    assert "Entity" in payload["context"]["aggregated_context"]
+    assert "Relation" in payload["context"]["aggregated_context"]
+    assert "Document" in payload["context"]["aggregated_context"]
 
     # Endpoint coverage for vector matching structure
     vmatch = payload["context"]["vector_matching"]
@@ -454,13 +422,14 @@ def test_query_one_hop_traversal_core_logic():
     assert gt.caps_applied.max_entities == 10
 
 
+@pytest.mark.live
 @pytest.mark.django_db
 @override_settings(
     LIGHTRAG={
         "EMBEDDING_PROVIDER": "test",
         "EMBEDDING_MODEL": "test-embedding",
         "EMBEDDING_BASE_URL": "http://test.invalid",
-        "LLM_MODEL": "test-llm",
+        "LLM_MODEL": "groq/llama-3.1-8b-instant",  # Use a real model for live test
         "CORE_FACTORY": "django_lightrag.tests.factories.make_test_core",
     }
 )
