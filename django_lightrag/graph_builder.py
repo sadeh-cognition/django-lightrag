@@ -1,10 +1,23 @@
 import hashlib
+from dataclasses import dataclass, field
 from typing import Any
 
 from .deduplication import canonical_entity_id, canonical_relation_id
-from .entity_extraction import extract_entities
+from .entity_extraction import (
+    DEFAULT_ENTITY_TYPES,
+    DEFAULT_SUMMARY_LANGUAGE,
+    extract_entities,
+)
 from .models import Document, Entity, Relation
 from .storage import LadybugGraphStorage
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeGraphBuilderConfig:
+    entity_extract_max_gleaning: int = 1
+    extraction_language: str = DEFAULT_SUMMARY_LANGUAGE
+    entity_types: list[str] = field(default_factory=lambda: list(DEFAULT_ENTITY_TYPES))
+    max_extract_input_tokens: int = 12000
 
 
 class KnowledgeGraphBuilder:
@@ -15,12 +28,12 @@ class KnowledgeGraphBuilder:
         llm_service: Any,
         tokenizer: Any,
         graph_storage: LadybugGraphStorage,
-        config: dict[str, Any],
+        config: KnowledgeGraphBuilderConfig | None = None,
     ):
         self.llm_service = llm_service
         self.tokenizer = tokenizer
         self.graph_storage = graph_storage
-        self.config = config
+        self.config = config or KnowledgeGraphBuilderConfig()
 
     def _generate_id(self, content: str) -> str:
         return hashlib.md5(content.encode()).hexdigest()
@@ -68,13 +81,11 @@ class KnowledgeGraphBuilder:
         document_results = extract_entities(
             document_payload,
             llm_callable=llm_model_func,
-            entity_extract_max_gleaning=self.config.get(
-                "ENTITY_EXTRACT_MAX_GLEANING", 1
-            ),
-            language=self.config.get("EXTRACTION_LANGUAGE", "English"),
-            entity_types=self.config.get("ENTITY_TYPES", []),
+            entity_extract_max_gleaning=self.config.entity_extract_max_gleaning,
+            language=self.config.extraction_language,
+            entity_types=self.config.entity_types,
             tokenizer=self.tokenizer,
-            max_extract_input_tokens=self.config.get("MAX_EXTRACT_INPUT_TOKENS", 12000),
+            max_extract_input_tokens=self.config.max_extract_input_tokens,
         )
         entity_by_name: dict[str, dict[str, Any]] = {}
         relation_by_key: dict[str, dict[str, Any]] = {}

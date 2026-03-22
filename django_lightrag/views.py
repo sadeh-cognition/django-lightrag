@@ -39,13 +39,13 @@ def build_lightrag_core(
 def create_lightrag_core():
     config = get_lightrag_settings()
     core_config = get_lightrag_core_settings()
-    factory_path = config.get("CORE_FACTORY")
+    factory_path = config.core_factory
     factory = import_string(factory_path) if factory_path else build_lightrag_core
     return factory(
-        embedding_model=core_config["EMBEDDING_MODEL"],
-        embedding_provider=core_config["EMBEDDING_PROVIDER"],
-        embedding_base_url=core_config["EMBEDDING_BASE_URL"],
-        llm_model=core_config["LLM_MODEL"],
+        embedding_model=core_config.embedding_model,
+        embedding_provider=core_config.embedding_provider,
+        embedding_base_url=core_config.embedding_base_url,
+        llm_model=core_config.llm_model,
     )
 
 

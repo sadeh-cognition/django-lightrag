@@ -68,10 +68,10 @@ class Command(BaseCommand):
 
         try:
             core = LightRAGCore(
-                embedding_model=config["EMBEDDING_MODEL"],
-                embedding_provider=config["EMBEDDING_PROVIDER"],
-                embedding_base_url=config["EMBEDDING_BASE_URL"],
-                llm_model=config["LLM_MODEL"],
+                embedding_model=config.embedding_model,
+                embedding_provider=config.embedding_provider,
+                embedding_base_url=config.embedding_base_url,
+                llm_model=config.llm_model,
             )
             try:
                 result = core.query(query_text, param)

@@ -18,6 +18,11 @@ Rules:
 
 
 @dataclass
+class QueryKeywordConfig:
+    query_keyword_max_tokens: int = 200
+
+
+@dataclass
 class QueryKeywords:
     low_level_keywords: list[str]
     high_level_keywords: list[str]
@@ -30,15 +35,17 @@ class QueryKeywords:
 
 
 class QueryKeywordExtractor:
-    def __init__(self, llm_service: Any, config: dict[str, Any] | None = None):
+    def __init__(
+        self, llm_service: Any, config: QueryKeywordConfig | None = None
+    ) -> None:
         self.llm_service = llm_service
-        self.config = config or {}
+        self.config = config or QueryKeywordConfig()
 
     def extract(self, query_text: str) -> QueryKeywords:
         response = self.llm_service.call_llm(
             user_prompt=query_text,
             system_prompt=KEYWORD_EXTRACTION_SYSTEM_PROMPT,
-            max_tokens=self.config.get("QUERY_KEYWORD_MAX_TOKENS", 200),
+            max_tokens=self.config.query_keyword_max_tokens,
         )
         return self.parse_response(response)
 

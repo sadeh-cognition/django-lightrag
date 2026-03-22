@@ -1,5 +1,6 @@
 import json
 import re
+from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any
 
@@ -20,12 +21,17 @@ Rules:
 """
 
 
+@dataclass(frozen=True, slots=True)
+class ProfilingConfig:
+    profile_max_tokens: int = 400
+
+
 class ProfilingService:
     """Generate retrieval-oriented profiles for canonical entities and relations."""
 
-    def __init__(self, llm_service: Any, config: dict[str, Any] | None = None):
+    def __init__(self, llm_service: Any, config: ProfilingConfig | None = None) -> None:
         self.llm_service = llm_service
-        self.config = config or {}
+        self.config = config or ProfilingConfig()
 
     def profile_entity(self, entity: Entity) -> bool:
         descriptions = self._get_description_fragments(entity)
@@ -136,7 +142,7 @@ class ProfilingService:
         response = self.llm_service.call_llm(
             user_prompt=json.dumps(payload, ensure_ascii=False, indent=2),
             system_prompt=PROFILE_SYSTEM_PROMPT,
-            max_tokens=self.config.get("PROFILE_MAX_TOKENS", 400),
+            max_tokens=self.config.profile_max_tokens,
         )
         key, value = self._parse_profile_response(response)
         key = key or fallback_key

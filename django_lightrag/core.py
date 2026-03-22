@@ -4,21 +4,17 @@ from typing import Any
 
 import requests
 from django.db import transaction
+from embed_gen.generator import generate_embeddings
 
-try:
-    from embed_gen.generator import generate_embeddings
-except ImportError:
-    generate_embeddings = None
-
-from .config import get_lightrag_settings
+from .config import LightRAGConfig, get_lightrag_settings
 from .deduplication import DeduplicationResult, GraphDeduplicationService
 from .entity_extraction import DEFAULT_ENTITY_TYPES, DEFAULT_SUMMARY_LANGUAGE
-from .graph_builder import KnowledgeGraphBuilder
+from .graph_builder import KnowledgeGraphBuilder, KnowledgeGraphBuilderConfig
 from .llm import LLMService
 from .models import Document, Entity, Relation
-from .profiling import ProfilingService
+from .profiling import ProfilingConfig, ProfilingService
 from .query_engine import QueryEngine
-from .query_keywords import QueryKeywordExtractor, QueryKeywords
+from .query_keywords import QueryKeywordConfig, QueryKeywordExtractor, QueryKeywords
 from .storage import ChromaVectorStorage, LadybugGraphStorage
 from .types import (
     DocumentVectorHit,
@@ -53,7 +49,7 @@ class LightRAGCore:
         tokenizer: Tokenizer | None = None,
         query_keyword_extractor: QueryKeywordExtractor | None = None,
     ):
-        self.config = get_lightrag_settings()
+        self.config: LightRAGConfig = get_lightrag_settings()
 
         self.tokenizer = tokenizer or Tokenizer()
         self.llm_service = llm_service or LLMService(
@@ -61,7 +57,7 @@ class LightRAGCore:
             temperature=(
                 llm_temperature
                 if llm_temperature is not None
-                else self.config.get("LLM_TEMPERATURE", 0.0)
+                else self.config.llm_temperature
             ),
         )
 
@@ -69,40 +65,31 @@ class LightRAGCore:
         self.vector_storage = vector_storage or ChromaVectorStorage()
         self.profiling_service = ProfilingService(
             llm_service=self.llm_service,
-            config={"PROFILE_MAX_TOKENS": self.config.get("PROFILE_MAX_TOKENS", 400)},
+            config=ProfilingConfig(profile_max_tokens=self.config.profile_max_tokens),
         )
         self.query_keyword_extractor = query_keyword_extractor or QueryKeywordExtractor(
             llm_service=self.llm_service,
-            config={
-                "QUERY_KEYWORD_MAX_TOKENS": self.config.get(
-                    "QUERY_KEYWORD_MAX_TOKENS", 200
-                )
-            },
+            config=QueryKeywordConfig(
+                query_keyword_max_tokens=self.config.query_keyword_max_tokens
+            ),
         )
         self.deduplication_service = GraphDeduplicationService(
             graph_storage=self.graph_storage,
             vector_storage=self.vector_storage,
         )
-
-        # Initialize specialized components
         self.graph_builder = KnowledgeGraphBuilder(
             llm_service=self.llm_service,
             tokenizer=self.tokenizer,
             graph_storage=self.graph_storage,
-            config={
-                "ENTITY_EXTRACT_MAX_GLEANING": self.config.get(
-                    "ENTITY_EXTRACT_MAX_GLEANING", 1
+            config=KnowledgeGraphBuilderConfig(
+                entity_extract_max_gleaning=self.config.entity_extract_max_gleaning,
+                extraction_language=(
+                    self.config.extraction_language or DEFAULT_SUMMARY_LANGUAGE
                 ),
-                "EXTRACTION_LANGUAGE": self.config.get(
-                    "EXTRACTION_LANGUAGE", DEFAULT_SUMMARY_LANGUAGE
-                ),
-                "ENTITY_TYPES": self.config.get("ENTITY_TYPES", DEFAULT_ENTITY_TYPES),
-                "MAX_EXTRACT_INPUT_TOKENS": self.config.get(
-                    "MAX_EXTRACT_INPUT_TOKENS", 12000
-                ),
-            },
+                entity_types=self.config.entity_types or list(DEFAULT_ENTITY_TYPES),
+                max_extract_input_tokens=self.config.max_extract_input_tokens,
+            ),
         )
-
         self.query_engine = QueryEngine(
             llm_service=self.llm_service,
             vector_storage=self.vector_storage,
@@ -112,10 +99,8 @@ class LightRAGCore:
         self.embedding_provider = embedding_provider
         self.embedding_model = embedding_model
         self.embedding_base_url = embedding_base_url
-
-        # Keep some config for backward compatibility or internal use
-        self.top_k = self.config.get("TOP_K", 10)
-        self.max_total_tokens = self.config.get("MAX_TOTAL_TOKENS", 12000)
+        self.top_k = self.config.top_k
+        self.max_total_tokens = self.config.max_total_tokens
 
     def _generate_id(self, content: str) -> str:
         """Generate a consistent ID from content"""

@@ -25,10 +25,10 @@ def run_update(
 
     try:
         core = LightRAGCore(
-            embedding_model=config["EMBEDDING_MODEL"],
-            embedding_provider=config["EMBEDDING_PROVIDER"],
-            embedding_base_url=config["EMBEDDING_BASE_URL"],
-            llm_model=config["LLM_MODEL"],
+            embedding_model=config.embedding_model,
+            embedding_provider=config.embedding_provider,
+            embedding_base_url=config.embedding_base_url,
+            llm_model=config.llm_model,
         )
         try:
             document_id = core.ingest_document(
@@ -65,10 +65,10 @@ def run_query(
         config = get_lightrag_core_settings()
         query_param = QueryParam(**param) if isinstance(param, dict) else param
         core = LightRAGCore(
-            embedding_model=config["EMBEDDING_MODEL"],
-            embedding_provider=config["EMBEDDING_PROVIDER"],
-            embedding_base_url=config["EMBEDDING_BASE_URL"],
-            llm_model=config["LLM_MODEL"],
+            embedding_model=config.embedding_model,
+            embedding_provider=config.embedding_provider,
+            embedding_base_url=config.embedding_base_url,
+            llm_model=config.llm_model,
         )
         try:
             return to_serializable(core.query(query, query_param or QueryParam()))

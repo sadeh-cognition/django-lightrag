@@ -36,10 +36,10 @@ class LadybugGraphStorage:
         """Get the database path"""
         ladybug_settings = get_ladybug_settings()
 
-        if ladybug_settings.get("IN_MEMORY", False):
+        if ladybug_settings.in_memory:
             return ":memory:"
 
-        base_path = Path(ladybug_settings["DATABASE_PATH"])
+        base_path = Path(ladybug_settings.database_path or "")
 
         # Use single database file
         return str(base_path)

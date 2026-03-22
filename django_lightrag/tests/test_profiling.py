@@ -3,7 +3,10 @@ import json
 import pytest
 
 from django_lightrag.core import LightRAGCore
-from django_lightrag.graph_builder import KnowledgeGraphBuilder
+from django_lightrag.graph_builder import (
+    KnowledgeGraphBuilder,
+    KnowledgeGraphBuilderConfig,
+)
 from django_lightrag.models import Document, Entity, Relation
 from django_lightrag.profiling import ProfilingService
 from django_lightrag.types import QueryParam
@@ -153,7 +156,7 @@ def test_merge_provenance_across_multiple_documents():
         llm_service=RecordingLLMService(),
         tokenizer=Tokenizer(),
         graph_storage=FakeGraphStorage(),
-        config={},
+        config=KnowledgeGraphBuilderConfig(),
     )
 
     entity_objects = builder._persist_entities(
