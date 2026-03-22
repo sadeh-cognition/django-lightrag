@@ -65,22 +65,17 @@ class KnowledgeGraphBuilder:
             }
         }
 
-        global_config = {
-            "llm_model_func": llm_model_func,
-            "entity_extract_max_gleaning": self.config.get(
+        document_results = extract_entities(
+            document_payload,
+            llm_callable=llm_model_func,
+            entity_extract_max_gleaning=self.config.get(
                 "ENTITY_EXTRACT_MAX_GLEANING", 1
             ),
-            "addon_params": {
-                "language": self.config.get("EXTRACTION_LANGUAGE", "English"),
-                "entity_types": self.config.get("ENTITY_TYPES", []),
-            },
-            "tokenizer": self.tokenizer,
-            "max_extract_input_tokens": self.config.get(
-                "MAX_EXTRACT_INPUT_TOKENS", 12000
-            ),
-        }
-
-        document_results = extract_entities(document_payload, global_config)
+            language=self.config.get("EXTRACTION_LANGUAGE", "English"),
+            entity_types=self.config.get("ENTITY_TYPES", []),
+            tokenizer=self.tokenizer,
+            max_extract_input_tokens=self.config.get("MAX_EXTRACT_INPUT_TOKENS", 12000),
+        )
         entity_by_name: dict[str, dict[str, Any]] = {}
         relation_by_key: dict[str, dict[str, Any]] = {}
 

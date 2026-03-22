@@ -1,7 +1,13 @@
 from unittest.mock import patch
 
 from django_lightrag import run_query
-from django_lightrag.types import QueryParam, QueryResult
+from django_lightrag.types import (
+    QueryContext,
+    QueryContextEntity,
+    QueryParam,
+    QueryResult,
+    QuerySource,
+)
 
 
 class StubCore:
@@ -28,8 +34,17 @@ class StubCore:
         type(self).last_query_args = (query_text, param)
         return QueryResult(
             response="graph answer",
-            sources=[{"type": "entity", "id": "entity-1"}],
-            context={"entities": [{"name": "Policy Engine"}]},
+            sources=[QuerySource(type="entity", id="entity-1")],
+            context=QueryContext(
+                entities=[
+                    QueryContextEntity(
+                        name="Policy Engine",
+                        entity_type="concept",
+                        description="desc",
+                        profile_key="policy",
+                    )
+                ]
+            ),
             query_time=0.25,
             tokens_used=12,
         )
@@ -59,7 +74,24 @@ def test_run_query_returns_serialized_result_and_closes_core():
     assert result == {
         "response": "graph answer",
         "sources": [{"type": "entity", "id": "entity-1"}],
-        "context": {"entities": [{"name": "Policy Engine"}]},
+        "context": {
+            "documents": [],
+            "entities": [
+                {
+                    "name": "Policy Engine",
+                    "entity_type": "concept",
+                    "description": "desc",
+                    "profile_key": "policy",
+                }
+            ],
+            "relations": [],
+            "query_keywords": {
+                "low_level_keywords": [],
+                "high_level_keywords": [],
+            },
+            "total_tokens": 0,
+            "aggregated_context": "",
+        },
         "query_time": 0.25,
         "tokens_used": 12,
     }

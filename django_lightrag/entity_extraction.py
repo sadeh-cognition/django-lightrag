@@ -26,6 +26,16 @@ class DocumentSchema(TypedDict, total=False):
     chunk_order_index: int
 
 
+class LLMCallable(Protocol):
+    def __call__(
+        self,
+        user_prompt: str,
+        system_prompt: str | None = None,
+        history_messages: list[dict[str, str]] | None = None,
+        max_tokens: int | None = None,
+    ) -> str: ...
+
+
 class BaseKVStorage(Protocol):
     global_config: dict
 
@@ -792,7 +802,12 @@ def _process_extraction_result(
 
 def extract_entities(
     documents: dict[str, DocumentSchema],
-    global_config: dict[str, str],
+    llm_callable: LLMCallable,
+    entity_extract_max_gleaning: int,
+    language: str = DEFAULT_SUMMARY_LANGUAGE,
+    entity_types: list[str] | None = None,
+    tokenizer: Any | None = None,
+    max_extract_input_tokens: int = 12000,
     pipeline_status: dict = None,
     pipeline_status_lock=None,
 ) -> list:
@@ -802,22 +817,15 @@ def extract_entities(
             if pipeline_status.get("cancellation_requested", False):
                 raise PipelineCancelledError("User cancelled during entity extraction")
 
-    llm_callable: callable = global_config["llm_model_func"]
-    entity_extract_max_gleaning = global_config["entity_extract_max_gleaning"]
-
     ordered_documents = list(documents.items())
-    # add language and example number params to prompt
-    language = global_config["addon_params"].get("language", DEFAULT_SUMMARY_LANGUAGE)
-    entity_types = global_config["addon_params"].get(
-        "entity_types", DEFAULT_ENTITY_TYPES
-    )
+    resolved_entity_types = entity_types or DEFAULT_ENTITY_TYPES
 
     examples = "\n".join(PROMPTS["entity_extraction_examples"])
 
     example_context_base = {
         "tuple_delimiter": PROMPTS["DEFAULT_TUPLE_DELIMITER"],
         "completion_delimiter": PROMPTS["DEFAULT_COMPLETION_DELIMITER"],
-        "entity_types": ", ".join(entity_types),
+        "entity_types": ", ".join(resolved_entity_types),
         "language": language,
     }
     # add example's format
@@ -826,7 +834,7 @@ def extract_entities(
     context_base = {
         "tuple_delimiter": PROMPTS["DEFAULT_TUPLE_DELIMITER"],
         "completion_delimiter": PROMPTS["DEFAULT_COMPLETION_DELIMITER"],
-        "entity_types": ",".join(entity_types),
+        "entity_types": ",".join(resolved_entity_types),
         "examples": examples,
         "language": language,
     }
@@ -883,8 +891,10 @@ def extract_entities(
         # Process additional gleaning results only 1 time when entity_extract_max_gleaning is greater than zero.
         if entity_extract_max_gleaning > 0:
             # Calculate total tokens for the gleaning request to prevent context window overflow
-            tokenizer = global_config["tokenizer"]
-            max_input_tokens = global_config["max_extract_input_tokens"]
+            if tokenizer is None:
+                raise ValueError(
+                    "tokenizer is required when entity_extract_max_gleaning is greater than 0"
+                )
 
             # Approximate total tokens: system prompt + history + user prompt.
             # This slightly underestimates actual API usage (missing role/framing tokens)
@@ -897,9 +907,9 @@ def extract_entities(
             )
             token_count = len(tokenizer.encode(full_context_str))
 
-            if token_count > max_input_tokens:
+            if token_count > max_extract_input_tokens:
                 logger.warning(
-                    f"Gleaning stopped for document {document_key}: Input tokens ({token_count}) exceeded limit ({max_input_tokens})."
+                    f"Gleaning stopped for document {document_key}: Input tokens ({token_count}) exceeded limit ({max_extract_input_tokens})."
                 )
             else:
                 glean_result = use_llm_func(

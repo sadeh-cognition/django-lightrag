@@ -190,21 +190,19 @@ def test_query_uses_split_keywords_for_retrieval_and_context():
 
     result = core.query("How are decisions enforced?", QueryParam(mode="hybrid"))
 
-    assert [source["type"] for source in result.sources] == [
+    assert [source.type for source in result.sources] == [
         "document",
         "entity",
         "relation",
     ]
-    assert result.context["query_keywords"] == {
-        "low_level_keywords": ["Policy Engine"],
-        "high_level_keywords": ["governance"],
-    }
-    assert result.context["entities"][0]["name"] == "Policy Engine"
-    assert result.context["relations"][0]["relation_type"] == "governs"
+    assert result.context.query_keywords.low_level_keywords == ["Policy Engine"]
+    assert result.context.query_keywords.high_level_keywords == ["governance"]
+    assert result.context.entities[0].name == "Policy Engine"
+    assert result.context.relations[0].relation_type == "governs"
 
-    # Verify context and generated response
-    assert result.response == "Generated answer for: How are decisions enforced?"
-    aggregated_context = result.context["aggregated_context"]
+    # Verify context is returned directly
+    aggregated_context = result.context.aggregated_context
+    assert result.response == aggregated_context
     assert "Entity\nName: Policy Engine" in aggregated_context
     assert "Relation\nSource: Policy Engine" in aggregated_context
     assert "Document\nDocument ID: query-doc" in aggregated_context
@@ -220,7 +218,13 @@ def test_query_uses_split_keywords_for_retrieval_and_context():
             "Document\nDocument ID: query-doc\nExcerpt: This document explains how Policy Engine decisions are recorded.",
         ]
     )
-    assert core.llm_service.calls[-1]["temperature"] == QueryParam().temperature
+    assert all(
+        "Answer the user using only the provided context."
+        not in (call["system_prompt"] or "")
+        for call in core.llm_service.calls
+    )
+    assert all(call["temperature"] is None for call in core.llm_service.calls)
+    assert result.tokens_used == result.context.total_tokens
 
     # Assert exactly one batched embedding call was made for retrieval
     assert len(core.embedding_calls) == 1
@@ -231,15 +235,16 @@ def test_query_uses_split_keywords_for_retrieval_and_context():
     ]
 
     # Assert vector_matching metadata
-    vector_match = result.context["vector_matching"]
-    assert vector_match["entities"]["query_source"] == "keyword"
-    assert vector_match["entities"]["hits"][0]["profile_key"] == "Policy Engine"
-    assert "score" in vector_match["entities"]["hits"][0]
+    vector_match = result.context.vector_matching
+    assert vector_match is not None
+    assert vector_match.entities.query_source == "keyword"
+    assert vector_match.entities.hits[0].profile_key == "Policy Engine"
+    assert vector_match.entities.hits[0].score >= 0
 
-    assert vector_match["relations"]["query_source"] == "keyword"
-    assert vector_match["relations"]["hits"][0]["profile_key"] == "governance"
+    assert vector_match.relations.query_source == "keyword"
+    assert vector_match.relations.hits[0].profile_key == "governance"
 
-    assert vector_match["documents"]["query_source"] == "raw"
+    assert vector_match.documents.query_source == "raw"
 
 
 @pytest.mark.django_db
@@ -256,19 +261,19 @@ def test_query_mode_controls_knowledge_graph_retrieval():
     local_result = core.query("How are decisions enforced?", QueryParam(mode="local"))
     global_result = core.query("How are decisions enforced?", QueryParam(mode="global"))
 
-    assert [item["name"] for item in local_result.context["entities"]] == [
-        "Policy Engine"
-    ]
-    assert local_result.context["relations"] == []
-    assert len(local_result.context["vector_matching"]["entities"]["hits"]) > 0
-    assert len(local_result.context["vector_matching"]["relations"]["hits"]) == 0
+    assert [item.name for item in local_result.context.entities] == ["Policy Engine"]
+    assert local_result.context.relations == []
+    assert local_result.context.vector_matching is not None
+    assert len(local_result.context.vector_matching.entities.hits) > 0
+    assert len(local_result.context.vector_matching.relations.hits) == 0
 
-    assert global_result.context["entities"] == []
-    assert [item["relation_type"] for item in global_result.context["relations"]] == [
+    assert global_result.context.entities == []
+    assert [item.relation_type for item in global_result.context.relations] == [
         "governs"
     ]
-    assert len(global_result.context["vector_matching"]["entities"]["hits"]) == 0
-    assert len(global_result.context["vector_matching"]["relations"]["hits"]) > 0
+    assert global_result.context.vector_matching is not None
+    assert len(global_result.context.vector_matching.entities.hits) == 0
+    assert len(global_result.context.vector_matching.relations.hits) > 0
 
 
 @pytest.mark.django_db
@@ -281,11 +286,9 @@ def test_query_returns_fallback_message_with_empty_context():
     Relation.objects.all().delete()
 
     result = core.query("What is the policy engine?", QueryParam(mode="hybrid"))
-    assert (
-        result.response
-        == "I don't have enough information in the provided context to answer your query."
-    )
-    assert result.context["aggregated_context"] == ""
+    assert result.response == ""
+    assert result.context.aggregated_context == ""
+    assert result.tokens_used == 0
 
 
 @pytest.mark.django_db
@@ -296,15 +299,11 @@ def test_query_falls_back_to_raw_query_when_keyword_extraction_fails():
 
     result = core.query("Policy Engine governance document", QueryParam(mode="hybrid"))
 
-    assert result.context["query_keywords"] == {
-        "low_level_keywords": [],
-        "high_level_keywords": [],
-    }
-    assert [item["name"] for item in result.context["entities"]] == ["Policy Engine"]
-    assert [item["relation_type"] for item in result.context["relations"]] == [
-        "governs"
-    ]
-    assert result.response == "Generated answer for: Policy Engine governance document"
+    assert result.context.query_keywords.low_level_keywords == []
+    assert result.context.query_keywords.high_level_keywords == []
+    assert [item.name for item in result.context.entities] == ["Policy Engine"]
+    assert [item.relation_type for item in result.context.relations] == ["governs"]
+    assert result.response == result.context.aggregated_context
 
     # Verify fallback query text
     assert len(core.embedding_calls) == 1
@@ -314,9 +313,10 @@ def test_query_falls_back_to_raw_query_when_keyword_extraction_fails():
         "Policy Engine governance document",  # relation fallback
     ]
 
-    vmatch = result.context["vector_matching"]
-    assert vmatch["entities"]["query_source"] == "fallback"
-    assert vmatch["relations"]["query_source"] == "fallback"
+    vmatch = result.context.vector_matching
+    assert vmatch is not None
+    assert vmatch.entities.query_source == "fallback"
+    assert vmatch.relations.query_source == "fallback"
 
 
 @pytest.mark.django_db
@@ -379,7 +379,7 @@ def test_query_endpoint_returns_extracted_keywords_in_context():
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["response"] == "Generated answer for: How does this work?"
+    assert payload["response"] == payload["context"]["aggregated_context"]
     assert payload["context"]["query_keywords"] == {
         "low_level_keywords": ["Policy Engine"],
         "high_level_keywords": ["governance"],
@@ -441,16 +441,17 @@ def test_query_one_hop_traversal_core_logic():
         ),
     )
 
-    source_entity_ids = [e["id"] for e in result.sources if e["type"] == "entity"]
-    source_relation_ids = [r["id"] for r in result.sources if r["type"] == "relation"]
+    source_entity_ids = [e.id for e in result.sources if e.type == "entity"]
+    source_relation_ids = [r.id for r in result.sources if r.type == "relation"]
 
     assert "neighbor-ent" in source_entity_ids
     assert "neighbor-rel" in source_relation_ids
 
-    gt = result.context["graph_traversal"]
-    assert "neighbor-ent" in gt["added_entity_ids"]
-    assert "neighbor-rel" in gt["added_relation_ids"]
-    assert gt["caps_applied"]["max_entities"] == 10
+    gt = result.context.graph_traversal
+    assert gt is not None
+    assert "neighbor-ent" in gt.added_entity_ids
+    assert "neighbor-rel" in gt.added_relation_ids
+    assert gt.caps_applied.max_entities == 10
 
 
 @pytest.mark.django_db

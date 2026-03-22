@@ -5,7 +5,16 @@ from django.db.models import Q
 from .llm import LLMService
 from .models import Document, Entity, Relation
 from .storage import ChromaVectorStorage
-from .types import QueryParam, QueryResult
+from .types import (
+    QueryContext,
+    QueryContextDocument,
+    QueryContextEntity,
+    QueryContextRelation,
+    QueryKeywordsResult,
+    QueryParam,
+    QueryResult,
+    QuerySource,
+)
 
 
 class QueryEngine:
@@ -167,19 +176,14 @@ class QueryEngine:
         entities: list[Entity],
         relations: list[Relation],
         param: QueryParam,
-    ) -> dict[str, Any]:
+    ) -> QueryContext:
         """Build context for response generation"""
-        context = {
-            "documents": [],
-            "entities": [],
-            "relations": [],
-            "query_keywords": {
-                "low_level_keywords": list(param.low_level_keywords),
-                "high_level_keywords": list(param.high_level_keywords),
-            },
-            "total_tokens": 0,
-            "aggregated_context": "",
-        }
+        context = QueryContext(
+            query_keywords=QueryKeywordsResult(
+                low_level_keywords=list(param.low_level_keywords),
+                high_level_keywords=list(param.high_level_keywords),
+            )
+        )
 
         aggregated_chunks = []
 
@@ -195,18 +199,18 @@ class QueryEngine:
                 ]
             )
             tokens = self.tokenizer.count_tokens(entity_chunk)
-            if context["total_tokens"] + tokens > param.max_tokens:
+            if context.total_tokens + tokens > param.max_tokens:
                 break
 
-            context["entities"].append(
-                {
-                    "name": entity.name,
-                    "entity_type": entity.entity_type,
-                    "description": profile_text,
-                    "profile_key": entity.profile_key,
-                }
+            context.entities.append(
+                QueryContextEntity(
+                    name=entity.name,
+                    entity_type=entity.entity_type,
+                    description=profile_text,
+                    profile_key=entity.profile_key,
+                )
             )
-            context["total_tokens"] += tokens
+            context.total_tokens += tokens
             aggregated_chunks.append(entity_chunk)
 
         # Add relations next
@@ -222,19 +226,19 @@ class QueryEngine:
                 ]
             )
             tokens = self.tokenizer.count_tokens(relation_chunk)
-            if context["total_tokens"] + tokens > param.max_tokens:
+            if context.total_tokens + tokens > param.max_tokens:
                 break
 
-            context["relations"].append(
-                {
-                    "source": relation.source_entity.name,
-                    "relation_type": relation.relation_type,
-                    "target": relation.target_entity.name,
-                    "description": profile_text,
-                    "profile_key": relation.profile_key,
-                }
+            context.relations.append(
+                QueryContextRelation(
+                    source=relation.source_entity.name,
+                    relation_type=relation.relation_type,
+                    target=relation.target_entity.name,
+                    description=profile_text,
+                    profile_key=relation.profile_key,
+                )
             )
-            context["total_tokens"] += tokens
+            context.total_tokens += tokens
             aggregated_chunks.append(relation_chunk)
 
         # Add documents last
@@ -248,8 +252,8 @@ class QueryEngine:
                 ]
             )
             tokens = self.tokenizer.count_tokens(document_chunk)
-            if context["total_tokens"] + tokens > param.max_tokens:
-                remaining_tokens = param.max_tokens - context["total_tokens"]
+            if context.total_tokens + tokens > param.max_tokens:
+                remaining_tokens = param.max_tokens - context.total_tokens
                 if remaining_tokens <= 0:
                     break
                 document_text = self.tokenizer.truncate_by_tokens(
@@ -265,19 +269,19 @@ class QueryEngine:
                     ]
                 )
                 tokens = self.tokenizer.count_tokens(document_chunk)
-                if context["total_tokens"] + tokens > param.max_tokens:
+                if context.total_tokens + tokens > param.max_tokens:
                     break
 
-            context["documents"].append(
-                {
-                    "content": document_text,
-                    "document_id": document.id,
-                }
+            context.documents.append(
+                QueryContextDocument(
+                    content=document_text,
+                    document_id=document.id,
+                )
             )
-            context["total_tokens"] += tokens
+            context.total_tokens += tokens
             aggregated_chunks.append(document_chunk)
 
-        context["aggregated_context"] = "\n\n".join(aggregated_chunks)
+        context.aggregated_context = "\n\n".join(aggregated_chunks)
         return context
 
     generate_system_prompt = """You are a retrieval-augmented assistant.
@@ -293,10 +297,10 @@ Context:
 """
 
     def generate_response(
-        self, query_text: str, context: dict[str, Any], param: QueryParam
+        self, query_text: str, context: QueryContext, param: QueryParam
     ) -> str:
         """Generate response based on context using LLM"""
-        aggregated_context = context.get("aggregated_context", "").strip()
+        aggregated_context = context.aggregated_context.strip()
 
         if not aggregated_context:
             return self.GROUNDED_FALLBACK_RESPONSE
@@ -317,55 +321,55 @@ Context:
         documents: list[Document],
         entities: list[Entity],
         relations: list[Relation],
-    ) -> list[dict[str, Any]]:
+    ) -> list[QuerySource]:
         """Format sources for the response"""
-        sources = []
+        sources: list[QuerySource] = []
 
         for document in documents:
             sources.append(
-                {
-                    "type": "document",
-                    "id": document.id,
-                    "content": (
+                QuerySource(
+                    type="document",
+                    id=document.id,
+                    content=(
                         document.content[:200] + "..."
                         if len(document.content) > 200
                         else document.content
                     ),
-                    "document_id": document.id,
-                }
+                    document_id=document.id,
+                )
             )
 
         for entity in entities:
             profile_text = entity.profile_value or entity.description
             sources.append(
-                {
-                    "type": "entity",
-                    "id": entity.id,
-                    "name": entity.name,
-                    "entity_type": entity.entity_type,
-                    "description": (
+                QuerySource(
+                    type="entity",
+                    id=entity.id,
+                    name=entity.name,
+                    entity_type=entity.entity_type,
+                    description=(
                         profile_text[:200] + "..."
                         if len(profile_text) > 200
                         else profile_text
                     ),
-                }
+                )
             )
 
         for relation in relations:
             profile_text = relation.profile_value or relation.description
             sources.append(
-                {
-                    "type": "relation",
-                    "id": relation.id,
-                    "source": relation.source_entity.name,
-                    "relation_type": relation.relation_type,
-                    "target": relation.target_entity.name,
-                    "description": (
+                QuerySource(
+                    type="relation",
+                    id=relation.id,
+                    source=relation.source_entity.name,
+                    relation_type=relation.relation_type,
+                    target=relation.target_entity.name,
+                    description=(
                         profile_text[:200] + "..."
                         if len(profile_text) > 200
                         else profile_text
                     ),
-                }
+                )
             )
 
         return sources

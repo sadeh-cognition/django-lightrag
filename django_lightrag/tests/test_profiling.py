@@ -383,11 +383,11 @@ def test_entity_and_relation_vector_upserts_and_profile_retrieval():
 
     context = core.query_engine.build_context([], entities, relations, QueryParam())
     assert (
-        context["entities"][0]["description"]
+        context.entities[0].description
         == "Governance policy oversight for the Policy Engine."
     )
     assert (
-        context["relations"][0]["description"]
+        context.relations[0].description
         == "Governance oversight connects Policy Engine to Control Plane."
     )
 

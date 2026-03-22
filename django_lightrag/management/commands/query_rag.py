@@ -90,22 +90,19 @@ class Command(BaseCommand):
                     self.stdout.write("=" * 50)
                     self.stdout.write("Sources:")
                     for i, source in enumerate(result.sources, 1):
-                        self.stdout.write(
-                            f"{i}. [{source['type'].upper()}] {source.get('name', source.get('id', ''))}"
-                        )
-                        if "content" in source:
-                            self.stdout.write(f"   {source['content'][:200]}...")
+                        label = source.name or source.id
+                        self.stdout.write(f"{i}. [{source.type.upper()}] {label}")
+                        if source.content:
+                            self.stdout.write(f"   {source.content[:200]}...")
 
                 if include_context:
                     self.stdout.write("=" * 50)
                     self.stdout.write("Context Summary:")
                     context = result.context
-                    self.stdout.write(f"Documents: {len(context.get('documents', []))}")
-                    self.stdout.write(f"Entities: {len(context.get('entities', []))}")
-                    self.stdout.write(f"Relations: {len(context.get('relations', []))}")
-                    self.stdout.write(
-                        f"Total Context Tokens: {context.get('total_tokens', 0)}"
-                    )
+                    self.stdout.write(f"Documents: {len(context.documents)}")
+                    self.stdout.write(f"Entities: {len(context.entities)}")
+                    self.stdout.write(f"Relations: {len(context.relations)}")
+                    self.stdout.write(f"Total Context Tokens: {context.total_tokens}")
             finally:
                 core.close()
         except Exception as e:

@@ -16,6 +16,7 @@ from .schemas import (
     RelationSchema,
     SuccessResponseSchema,
 )
+from .serialization import to_serializable
 
 router = Router()
 
@@ -97,13 +98,7 @@ def query_rag(request, data: QueryRequestSchema):
         core = create_lightrag_core()
         try:
             result = core.query(data.query, param)
-            return QueryResultSchema(
-                response=result.response,
-                sources=result.sources,
-                context=result.context,
-                query_time=result.query_time,
-                tokens_used=result.tokens_used,
-            )
+            return QueryResultSchema(**to_serializable(result))
         finally:
             core.close()
 

@@ -1,7 +1,7 @@
-from dataclasses import asdict
 from typing import Any
 
 from .config import get_lightrag_core_settings
+from .serialization import to_serializable
 from .types import QueryParam
 
 
@@ -71,7 +71,7 @@ def run_query(
             llm_model=config["LLM_MODEL"],
         )
         try:
-            return asdict(core.query(query, query_param or QueryParam()))
+            return to_serializable(core.query(query, query_param or QueryParam()))
         finally:
             core.close()
     except Exception as e:

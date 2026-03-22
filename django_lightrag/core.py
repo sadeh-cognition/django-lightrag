@@ -20,7 +20,19 @@ from .profiling import ProfilingService
 from .query_engine import QueryEngine
 from .query_keywords import QueryKeywordExtractor, QueryKeywords
 from .storage import ChromaVectorStorage, LadybugGraphStorage
-from .types import QueryParam, QueryResult
+from .types import (
+    DocumentVectorHit,
+    DocumentVectorMatches,
+    EntityVectorHit,
+    EntityVectorMatches,
+    GraphTraversalCaps,
+    GraphTraversalResult,
+    QueryParam,
+    QueryResult,
+    RelationVectorHit,
+    RelationVectorMatches,
+    VectorMatchingResult,
+)
 from .utils import Tokenizer
 
 
@@ -250,15 +262,15 @@ class LightRAGCore:
                 seed_entity_ids.add(rel.source_entity_id)
                 seed_entity_ids.add(rel.target_entity_id)
 
-            graph_traversal_debug = {
-                "seed_entity_ids": list(seed_entity_ids),
-                "added_entity_ids": [e.id for e in expanded_entities],
-                "added_relation_ids": [r.id for r in expanded_relations],
-                "caps_applied": {
-                    "max_entities": getattr(param, "one_hop_max_entities", 10),
-                    "max_relations": getattr(param, "one_hop_max_relations", 10),
-                },
-            }
+            graph_traversal_debug = GraphTraversalResult(
+                seed_entity_ids=list(seed_entity_ids),
+                added_entity_ids=[e.id for e in expanded_entities],
+                added_relation_ids=[r.id for r in expanded_relations],
+                caps_applied=GraphTraversalCaps(
+                    max_entities=getattr(param, "one_hop_max_entities", 10),
+                    max_relations=getattr(param, "one_hop_max_relations", 10),
+                ),
+            )
 
             relevant_entities = merged_entities
             relevant_relations = merged_relations
@@ -269,58 +281,60 @@ class LightRAGCore:
         )
 
         # 5. Inject Vector Matching Debug Context
-        context["vector_matching"] = {
-            "documents": {
-                "query_text": document_branch["query_text"],
-                "query_source": document_branch["query_source"],
-                "hits": [
-                    {"id": hit["id"], "score": hit["score"], "rank": rank + 1}
+        context.vector_matching = VectorMatchingResult(
+            documents=DocumentVectorMatches(
+                query_text=document_branch["query_text"],
+                query_source=document_branch["query_source"],
+                hits=[
+                    DocumentVectorHit(
+                        id=hit["id"],
+                        score=hit["score"],
+                        rank=rank + 1,
+                    )
                     for rank, hit in enumerate(doc_vectors)
                 ],
-                "selected_ids": [d["document_id"] for d in context["documents"]],
-            },
-            "entities": {
-                "query_text": entity_branch["query_text"],
-                "query_source": entity_branch["query_source"],
-                "hits": [
-                    {
-                        "id": hit["metadata"].get("entity_id", hit["id"]),
-                        "name": hit["metadata"].get("name", "Unknown Entity"),
-                        "profile_key": hit["metadata"].get("profile_key", ""),
-                        "score": hit["score"],
-                        "rank": rank + 1,
-                    }
+                selected_ids=[d.document_id for d in context.documents],
+            ),
+            entities=EntityVectorMatches(
+                query_text=entity_branch["query_text"],
+                query_source=entity_branch["query_source"],
+                hits=[
+                    EntityVectorHit(
+                        id=hit["metadata"].get("entity_id", hit["id"]),
+                        name=hit["metadata"].get("name", "Unknown Entity"),
+                        profile_key=hit["metadata"].get("profile_key", ""),
+                        score=hit["score"],
+                        rank=rank + 1,
+                    )
                     for rank, hit in enumerate(ent_vectors)
                 ],
-                "selected_ids": [
-                    e.id for e in relevant_entities[: len(context["entities"])]
-                ],
-            },
-            "relations": {
-                "query_text": relation_branch["query_text"],
-                "query_source": relation_branch["query_source"],
-                "hits": [
-                    {
-                        "id": hit["metadata"].get("relation_id", hit["id"]),
-                        "source": hit["metadata"].get("source_entity_id", ""),
-                        "relation_type": hit["metadata"].get("relation_type", ""),
-                        "target": hit["metadata"].get("target_entity_id", ""),
-                        "profile_key": hit["metadata"].get("profile_key", ""),
-                        "score": hit["score"],
-                        "rank": rank + 1,
-                    }
+                selected_ids=[e.id for e in relevant_entities[: len(context.entities)]],
+            ),
+            relations=RelationVectorMatches(
+                query_text=relation_branch["query_text"],
+                query_source=relation_branch["query_source"],
+                hits=[
+                    RelationVectorHit(
+                        id=hit["metadata"].get("relation_id", hit["id"]),
+                        source=hit["metadata"].get("source_entity_id", ""),
+                        relation_type=hit["metadata"].get("relation_type", ""),
+                        target=hit["metadata"].get("target_entity_id", ""),
+                        profile_key=hit["metadata"].get("profile_key", ""),
+                        score=hit["score"],
+                        rank=rank + 1,
+                    )
                     for rank, hit in enumerate(rel_vectors)
                 ],
-                "selected_ids": [
-                    r.id for r in relevant_relations[: len(context["relations"])]
+                selected_ids=[
+                    r.id for r in relevant_relations[: len(context.relations)]
                 ],
-            },
-        }
+            ),
+        )
 
         if graph_traversal_debug:
-            context["graph_traversal"] = graph_traversal_debug
+            context.graph_traversal = graph_traversal_debug
 
-        response = self.query_engine.generate_response(query_text, context, param)
+        response = context.aggregated_context
 
         query_time = time.time() - start_time
 
@@ -331,7 +345,7 @@ class LightRAGCore:
             ),
             context=context,
             query_time=query_time,
-            tokens_used=self.tokenizer.count_tokens(response),
+            tokens_used=context.total_tokens,
         )
 
     def _retrieve_knowledge_graph_vectors(
