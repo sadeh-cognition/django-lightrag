@@ -57,8 +57,14 @@ class InMemoryVectorStorage:
             vector_type: InMemoryCollection() for vector_type in self.records
         }
 
-    def upsert_embedding(self, vector_type, content_id, embedding, metadata=None):
-        record = {"embedding": embedding, "metadata": metadata or {}}
+    def upsert_embedding(
+        self, vector_type, content_id, embedding, metadata=None, document=None
+    ):
+        record = {
+            "embedding": embedding,
+            "metadata": metadata or {},
+            "document": document,
+        }
         self.records[vector_type][content_id] = record
         self.collections[vector_type].records[content_id] = record
         return content_id
@@ -355,6 +361,14 @@ def test_entity_and_relation_vector_upserts_and_profile_retrieval():
     assert relation_record["ids"] == [relation.id]
     assert entity_record["metadatas"][0]["content"]
     assert relation_record["metadatas"][0]["content"]
+    assert (
+        vector_storage.records["entity"][policy_engine.id]["document"]
+        == entity_record["metadatas"][0]["content"]
+    )
+    assert (
+        vector_storage.records["relation"][relation.id]["document"]
+        == relation_record["metadatas"][0]["content"]
+    )
 
     query_embedding = core._get_query_embedding("governance")
     ent_vectors = core.query_engine.search_entity_vectors(query_embedding, top_k=2)

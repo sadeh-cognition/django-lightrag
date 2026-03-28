@@ -5,7 +5,7 @@ from django.contrib.auth import get_user_model
 from django_llm_chat.chat import Chat
 from django_llm_chat.models import Project
 
-from .models import Document, Entity, Relation
+
 from .storage import ChromaVectorStorage
 from .types import (
     QueryContext,
@@ -52,8 +52,10 @@ class QueryEngine:
 
     def hydrate_documents(
         self, vector_results: list[dict], fallback_top_k: int
-    ) -> list[Document]:
+    ) -> list[Any]:
         """Hydrate vector search results into Document ORM objects"""
+        from .models import Document
+
         if not vector_results:
             return list(Document.objects.all().order_by("-created_at")[:fallback_top_k])
 
@@ -77,8 +79,10 @@ class QueryEngine:
             "entity", query_embedding, top_k=top_k
         )
 
-    def hydrate_entities(self, vector_results: list[dict]) -> list[Entity]:
+    def hydrate_entities(self, vector_results: list[dict]) -> list[Any]:
         """Hydrate vector search results into Entity ORM objects, deduplicating by entity ID while preserving vector rank."""
+        from .models import Entity
+
         entity_ids = []
         seen = set()
         for item in vector_results:
@@ -100,8 +104,10 @@ class QueryEngine:
             "relation", query_embedding, top_k=top_k
         )
 
-    def hydrate_relations(self, vector_results: list[dict]) -> list[Relation]:
+    def hydrate_relations(self, vector_results: list[dict]) -> list[Any]:
         """Hydrate vector search results into Relation ORM objects, deduplicating by relation ID while preserving vector rank."""
+        from .models import Relation
+
         relation_ids = []
         seen = set()
         for item in vector_results:
@@ -130,14 +136,16 @@ class QueryEngine:
 
     def expand_one_hop_neighborhood(
         self,
-        relevant_entities: list[Entity],
-        relevant_relations: list[Relation],
+        relevant_entities: list[Any],
+        relevant_relations: list[Any],
         max_entities: int,
         max_relations: int,
-    ) -> tuple[list[Entity], list[Relation]]:
+    ) -> tuple[list[Any], list[Any]]:
         """Expand the context by finding one-hop neighboring entities and relations.
         Excludes the seeds that were already found via vector matching.
         """
+        from .models import Relation
+
         seed_entity_ids = {e.id for e in relevant_entities}
         for rel in relevant_relations:
             seed_entity_ids.add(rel.source_entity_id)
@@ -176,9 +184,9 @@ class QueryEngine:
 
     def build_context(
         self,
-        documents: list[Document],
-        entities: list[Entity],
-        relations: list[Relation],
+        documents: list[Any],
+        entities: list[Any],
+        relations: list[Any],
         param: QueryParam,
     ) -> QueryContext:
         """Build context for response generation"""
@@ -334,9 +342,9 @@ Context:
 
     def format_sources(
         self,
-        documents: list[Document],
-        entities: list[Entity],
-        relations: list[Relation],
+        documents: list[Any],
+        entities: list[Any],
+        relations: list[Any],
     ) -> list[QuerySource]:
         """Format sources for the response"""
         sources: list[QuerySource] = []

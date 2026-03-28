@@ -16,11 +16,13 @@ class FakeVectorStorage:
         content_id: str,
         embedding: list[float],
         metadata: dict | None = None,
+        document: str | None = None,
     ) -> str:
         key = f"{vector_type}:{content_id}"
         self._records[key] = {
             "embedding": embedding,
             "metadata": metadata or {},
+            "document": document,
         }
         return content_id
 

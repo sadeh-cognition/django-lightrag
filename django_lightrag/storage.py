@@ -479,6 +479,7 @@ class ChromaVectorStorage:
         content_id: str,
         embedding: list[float],
         metadata: dict[str, Any] = None,
+        document: str | None = None,
     ) -> str:
         """Add a vector embedding"""
         if vector_type not in self.collections:
@@ -495,9 +496,15 @@ class ChromaVectorStorage:
         )
 
         try:
-            collection.add(
-                embeddings=[embedding], ids=[content_id], metadatas=[metadata]
-            )
+            add_kwargs: dict[str, Any] = {
+                "embeddings": [embedding],
+                "ids": [content_id],
+                "metadatas": [metadata],
+            }
+            if document is not None:
+                add_kwargs["documents"] = [document]
+
+            collection.add(**add_kwargs)
             return content_id
         except Exception as e:
             raise RuntimeError(f"Failed to add embedding: {e}") from e
@@ -508,6 +515,7 @@ class ChromaVectorStorage:
         content_id: str,
         embedding: list[float],
         metadata: dict[str, Any] = None,
+        document: str | None = None,
     ) -> str:
         """Create or replace a vector embedding."""
         if vector_type not in self.collections:
@@ -524,9 +532,15 @@ class ChromaVectorStorage:
         )
 
         try:
-            collection.upsert(
-                embeddings=[embedding], ids=[content_id], metadatas=[metadata]
-            )
+            upsert_kwargs: dict[str, Any] = {
+                "embeddings": [embedding],
+                "ids": [content_id],
+                "metadatas": [metadata],
+            }
+            if document is not None:
+                upsert_kwargs["documents"] = [document]
+
+            collection.upsert(**upsert_kwargs)
             return content_id
         except Exception as e:
             raise RuntimeError(f"Failed to upsert embedding: {e}") from e
@@ -607,9 +621,16 @@ class ChromaVectorStorage:
         content_id: str,
         embedding: list[float],
         metadata: dict[str, Any] = None,
+        document: str | None = None,
     ) -> bool:
         """Update a vector embedding"""
-        self.upsert_embedding(vector_type, content_id, embedding, metadata)
+        self.upsert_embedding(
+            vector_type,
+            content_id,
+            embedding,
+            metadata,
+            document=document,
+        )
         return True
 
     def close(self):

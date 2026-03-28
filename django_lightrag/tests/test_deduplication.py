@@ -68,8 +68,14 @@ class InMemoryVectorStorage:
             vector_type: InMemoryCollection() for vector_type in self.records
         }
 
-    def upsert_embedding(self, vector_type, content_id, embedding, metadata=None):
-        record = {"embedding": embedding, "metadata": metadata or {}}
+    def upsert_embedding(
+        self, vector_type, content_id, embedding, metadata=None, document=None
+    ):
+        record = {
+            "embedding": embedding,
+            "metadata": metadata or {},
+            "document": document,
+        }
         self.records[vector_type][content_id] = record
         self.collections[vector_type].records[content_id] = record
         return content_id
@@ -371,6 +377,10 @@ def test_ingest_runs_targeted_dedup_before_profiling():
     assert document_id
     assert core.profiling_service.entity_ids == [canonical_acme_id]
     assert core.profiling_service.relation_ids == [canonical_relation]
+    assert (
+        vector_storage.records["document"][document_id]["document"]
+        == "Acme builds Atlas."
+    )
     assert Entity.objects.filter(name="Acme", entity_type="company").count() == 1
     assert Relation.objects.filter(relation_type="builds").count() == 1
     assert (

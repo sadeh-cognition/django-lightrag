@@ -11,10 +11,13 @@ class EndpointVectorStorage:
             "relation": {},
         }
 
-    def upsert_embedding(self, vector_type, content_id, embedding, metadata=None):
+    def upsert_embedding(
+        self, vector_type, content_id, embedding, metadata=None, document=None
+    ):
         self.records[vector_type][content_id] = {
             "embedding": embedding,
             "metadata": metadata or {},
+            "document": document,
         }
         return content_id
 

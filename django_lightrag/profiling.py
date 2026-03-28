@@ -9,7 +9,6 @@ from django.contrib.auth import get_user_model
 from django_llm_chat.chat import Chat
 from django_llm_chat.models import Project
 
-from .models import Document, Entity, Relation
 
 PROFILE_SYSTEM_PROMPT = """You generate retrieval-oriented knowledge graph profiles.
 
@@ -42,7 +41,7 @@ class ProfilingService:
         self.temperature = temperature
         self.config = config or ProfilingConfig()
 
-    def profile_entity(self, entity: Entity) -> bool:
+    def profile_entity(self, entity: Any) -> bool:
         descriptions = self._get_description_fragments(entity)
         source_ids = self._normalize_ids(entity.source_ids)
         input_hash = self._hash_payload(
@@ -89,7 +88,7 @@ class ProfilingService:
         )
         return True
 
-    def profile_relation(self, relation: Relation) -> bool:
+    def profile_relation(self, relation: Any) -> bool:
         descriptions = self._get_description_fragments(relation)
         source_ids = self._normalize_ids(relation.source_ids)
         keywords = self._get_keywords(relation)
@@ -196,7 +195,9 @@ class ProfilingService:
             value_match.group(1).strip() if value_match else "",
         )
 
-    def _load_documents(self, source_ids: list[str]) -> list[Document]:
+    def _load_documents(self, source_ids: list[str]) -> list[Any]:
+        from .models import Document
+
         documents_by_id = {
             document.id: document
             for document in Document.objects.filter(id__in=source_ids)
@@ -207,7 +208,7 @@ class ProfilingService:
             if source_id in documents_by_id
         ]
 
-    def _get_description_fragments(self, record: Entity | Relation) -> list[str]:
+    def _get_description_fragments(self, record: Any) -> list[str]:
         metadata_fragments = record.metadata.get("description_fragments", [])
         if isinstance(metadata_fragments, list):
             fragments = [
@@ -221,7 +222,7 @@ class ProfilingService:
         description = (record.description or "").strip()
         return [description] if description else []
 
-    def _get_keywords(self, relation: Relation) -> list[str]:
+    def _get_keywords(self, relation: Any) -> list[str]:
         keywords_list = relation.metadata.get("keywords_list", [])
         if isinstance(keywords_list, list):
             values = [
@@ -237,7 +238,7 @@ class ProfilingService:
             return []
         return [value.strip() for value in keywords.split(",") if value.strip()]
 
-    def _needs_refresh(self, record: Entity | Relation, input_hash: str) -> bool:
+    def _needs_refresh(self, record: Any, input_hash: str) -> bool:
         return (
             record.profile_input_hash != input_hash
             or not (record.profile_key or "").strip()

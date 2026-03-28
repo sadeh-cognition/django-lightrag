@@ -462,6 +462,7 @@ class LightRAGCore:
                 "content": document.content[:500],
                 "document_id": document.id,
             },
+            document=document.content,
         )
 
     def _profile_knowledge_graph(
@@ -512,6 +513,7 @@ class LightRAGCore:
                     "profile_value": entity.profile_value,
                     "content": embedding_input,
                 },
+                document=embedding_input,
             )
 
     def _upsert_relation_embeddings(self, relations: list[Relation]) -> None:
@@ -551,6 +553,7 @@ class LightRAGCore:
                     "profile_value": relation.profile_value,
                     "content": embedding_input,
                 },
+                document=embedding_input,
             )
 
     def backfill_profiles(

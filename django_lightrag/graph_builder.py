@@ -8,7 +8,7 @@ from .entity_extraction import (
     DEFAULT_SUMMARY_LANGUAGE,
     extract_entities,
 )
-from .models import Document, Entity, Relation
+
 from .storage import LadybugGraphStorage
 
 
@@ -44,9 +44,9 @@ class KnowledgeGraphBuilder:
         primary = keywords.split(",")[0].strip()
         return primary[:100] if primary else "related_to"
 
-    def extract_and_persist(
-        self, document: Document
-    ) -> tuple[list[Entity], list[Relation]]:
+    def extract_and_persist(self, document: Any) -> tuple[list[Any], list[Any]]:
+        from .models import Entity, Relation
+
         """Extract and persist canonical entities and relations from a document."""
         entity_by_name, relation_by_key = self._extract_knowledge_graph(document)
         entity_objects = self._persist_entities(entity_by_name)
@@ -54,7 +54,7 @@ class KnowledgeGraphBuilder:
         return list(entity_objects.values()), relation_objects
 
     def _extract_knowledge_graph(
-        self, document: Document
+        self, document: Any
     ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
         document_payload = {
             document.id: {
@@ -168,7 +168,9 @@ class KnowledgeGraphBuilder:
 
     def _persist_entities(
         self, entity_by_name: dict[str, dict[str, Any]]
-    ) -> dict[str, Entity]:
+    ) -> dict[str, Any]:
+        from .models import Entity
+
         entity_objects: dict[str, Entity] = {}
 
         for entity_name, entity_data in entity_by_name.items():
@@ -224,8 +226,10 @@ class KnowledgeGraphBuilder:
         return entity_objects
 
     def _get_or_create_placeholder_entity(
-        self, entity_objects: dict[str, Entity], entity_name: str, source_ids: list[str]
-    ) -> Entity:
+        self, entity_objects: dict[str, Any], entity_name: str, source_ids: list[str]
+    ) -> Any:
+        from .models import Entity
+
         if entity_name in entity_objects:
             return entity_objects[entity_name]
 
@@ -285,8 +289,10 @@ class KnowledgeGraphBuilder:
     def _persist_relations(
         self,
         relation_by_key: dict[str, dict[str, Any]],
-        entity_objects: dict[str, Entity],
-    ) -> list[Relation]:
+        entity_objects: dict[str, Any],
+    ) -> list[Any]:
+        from .models import Relation
+
         relation_objects: list[Relation] = []
 
         for relation_data in relation_by_key.values():
@@ -378,7 +384,7 @@ class KnowledgeGraphBuilder:
 
         return relation_objects
 
-    def _get_description_fragments(self, record: Entity | Relation) -> list[str]:
+    def _get_description_fragments(self, record: Any) -> list[str]:
         metadata_fragments = record.metadata.get("description_fragments", [])
         if isinstance(metadata_fragments, list):
             fragments = self._normalize_string_list(metadata_fragments)

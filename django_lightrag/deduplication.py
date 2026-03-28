@@ -5,8 +5,6 @@ from typing import Any
 
 from django.db import transaction
 
-from .models import Entity, Relation
-
 
 def normalize_identity_value(value: str) -> str:
     collapsed = re.sub(r"\s+", " ", str(value or "").strip())
@@ -39,7 +37,7 @@ def canonical_relation_id(
     return hashlib.md5(payload.encode()).hexdigest()
 
 
-def get_description_fragments(record: Entity | Relation) -> list[str]:
+def get_description_fragments(record: Any) -> list[str]:
     metadata_fragments = record.metadata.get("description_fragments", [])
     if isinstance(metadata_fragments, list):
         fragments = stable_unique_strings(metadata_fragments)
@@ -50,7 +48,7 @@ def get_description_fragments(record: Entity | Relation) -> list[str]:
     return [description] if description else []
 
 
-def get_relation_keywords(record: Relation) -> list[str]:
+def get_relation_keywords(record: Any) -> list[str]:
     keywords_list = record.metadata.get("keywords_list", [])
     if isinstance(keywords_list, list):
         values = stable_unique_strings(keywords_list)
@@ -63,7 +61,7 @@ def get_relation_keywords(record: Relation) -> list[str]:
     return stable_unique_strings(keywords.split(","))
 
 
-def build_entity_group_key(entity: Entity) -> tuple[str, str]:
+def build_entity_group_key(entity: Any) -> tuple[str, str]:
     return (
         normalize_identity_value(entity.name),
         normalize_identity_value(entity.entity_type),
@@ -71,7 +69,7 @@ def build_entity_group_key(entity: Entity) -> tuple[str, str]:
 
 
 def build_relation_group_key(
-    relation: Relation,
+    relation: Any,
 ) -> tuple[str, str, str]:
     source_id, target_id = sorted(
         [relation.source_entity_id, relation.target_entity_id]
@@ -89,8 +87,8 @@ class DeduplicationResult:
     deleted_entities: int = 0
     merged_relations: int = 0
     deleted_relations: int = 0
-    surviving_entities: list[Entity] = field(default_factory=list)
-    surviving_relations: list[Relation] = field(default_factory=list)
+    surviving_entities: list[Any] = field(default_factory=list)
+    surviving_relations: list[Any] = field(default_factory=list)
 
     def as_counts(self) -> dict[str, int]:
         return {
@@ -154,6 +152,8 @@ class GraphDeduplicationService:
         return result
 
     def _deduplicate_entities(self, target_entity_ids: set[str]) -> dict[str, Any]:
+        from .models import Entity, Relation
+
         queryset = Entity.objects.all().order_by("created_at", "id")
         entities = list(queryset)
         if target_entity_ids:
@@ -209,9 +209,9 @@ class GraphDeduplicationService:
             "survivors": survivors,
         }
 
-    def _merge_entity_group(
-        self, entities: list[Entity]
-    ) -> tuple[Entity, list[Entity]]:
+    def _merge_entity_group(self, entities: list[Any]) -> tuple[Any, list[Any]]:
+        from .models import Entity, Relation
+
         ordered_entities = sorted(
             entities, key=lambda entity: (entity.created_at, entity.id)
         )
@@ -285,6 +285,8 @@ class GraphDeduplicationService:
         target_relation_ids: set[str],
         target_entity_ids: set[str],
     ) -> dict[str, Any]:
+        from .models import Relation
+
         queryset = Relation.objects.select_related(
             "source_entity", "target_entity"
         ).order_by("created_at", "id")
@@ -348,9 +350,9 @@ class GraphDeduplicationService:
             "survivors": survivors,
         }
 
-    def _merge_relation_group(
-        self, relations: list[Relation]
-    ) -> tuple[Relation, list[Relation]]:
+    def _merge_relation_group(self, relations: list[Any]) -> tuple[Any, list[Any]]:
+        from .models import Relation
+
         ordered_relations = sorted(
             relations, key=lambda relation: (relation.created_at, relation.id)
         )
@@ -434,9 +436,9 @@ class GraphDeduplicationService:
     def _sync_graph_storage(
         self,
         *,
-        surviving_entities: list[Entity],
+        surviving_entities: list[Any],
         deleted_entity_ids: set[str],
-        surviving_relations: list[Relation],
+        surviving_relations: list[Any],
         relation_pairs_to_resync: set[tuple[str, str]],
     ) -> None:
         for entity_id in sorted(deleted_entity_ids):
