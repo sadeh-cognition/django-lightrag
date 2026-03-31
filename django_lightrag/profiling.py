@@ -4,23 +4,12 @@ from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any
 
-from django.utils import timezone
 from django.contrib.auth import get_user_model
-from django_llm_chat.chat import Chat
+from django.utils import timezone
 from django_llm_chat.models import Project
 
-
-PROFILE_SYSTEM_PROMPT = """You generate retrieval-oriented knowledge graph profiles.
-
-Return JSON only, with exactly this shape:
-{"key": "short retrieval phrase", "value": "single grounded paragraph"}
-
-Rules:
-- The key must be a single word or short phrase optimized for retrieval.
-- The value must be one paragraph grounded only in the provided descriptions and snippets.
-- Do not invent facts, citations, bullet points, or markdown.
-- Prefer concrete nouns and task-relevant phrasing in the key.
-"""
+from .dspy_runtime import run_dspy_signature
+from .prompts.profile_generation import ProfileGenerationSignature
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,22 +138,18 @@ class ProfilingService:
     ) -> tuple[str, str]:
         user, _ = get_user_model().objects.get_or_create(username="lightrag_django")
         project, _ = Project.objects.get_or_create(name="lightrag_django")
-        chat = Chat.create(project=project)
-
-        chat.create_system_message(PROFILE_SYSTEM_PROMPT, user=user)
-
-        chat.call_llm(
-            model_name=self.model,
-            message=json.dumps(payload, ensure_ascii=False, indent=2),
+        prediction = run_dspy_signature(
+            ProfileGenerationSignature,
+            model=self.model,
+            project=project,
             user=user,
-            include_chat_history=True,
+            inputs={"payload_json": json.dumps(payload, ensure_ascii=False, indent=2)},
             temperature=self.temperature,
             max_tokens=self.config.profile_max_tokens,
             use_cache=True,
         )
-        response = chat.last_llm_message.text if chat.last_llm_message else ""
-
-        key, value = self._parse_profile_response(response)
+        key = str(getattr(prediction, "key", "")).strip()
+        value = str(getattr(prediction, "value", "")).strip()
         key = key or fallback_key
         value = value or fallback_value
         return self._normalize_key(key), self._normalize_value(value)

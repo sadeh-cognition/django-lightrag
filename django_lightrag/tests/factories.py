@@ -79,7 +79,6 @@ def make_test_core(
         embedding_provider=embedding_provider,
         embedding_base_url=embedding_base_url,
         llm_model=llm_model,
-        llm_service=EndpointLLMService(),
         graph_storage=EndpointGraphStorage(),
         vector_storage=vector_storage,
         tokenizer=Tokenizer(),

@@ -9,18 +9,15 @@ from collections import defaultdict
 from typing import Any, TypedDict
 
 from django.contrib.auth import get_user_model
-from django_llm_chat.chat import Chat
+from django_llm_chat.dspy_chat import DSPyChat
 from django_llm_chat.models import Project
 
-from .entity_extraction_prompts import (
-    DEFAULT_COMPLETION_DELIMITER,
-    DEFAULT_TUPLE_DELIMITER,
-    ENTITY_CONTINUE_EXTRACTION_USER_PROMPT,
-    ENTITY_EXTRACTION_EXAMPLE_ATHLETICS,
-    ENTITY_EXTRACTION_EXAMPLE_MARKETS,
-    ENTITY_EXTRACTION_EXAMPLE_STORY,
-    ENTITY_EXTRACTION_SYSTEM_PROMPT,
-    ENTITY_EXTRACTION_USER_PROMPT,
+from .dspy_runtime import extract_dspy_response_text
+from .prompts import (
+    render_entity_continue_extraction_user_prompt,
+    render_entity_extraction_examples,
+    render_entity_extraction_system_prompt,
+    render_entity_extraction_user_prompt,
 )
 
 logger = logging.getLogger(__name__)
@@ -42,6 +39,8 @@ class DocumentSchema(TypedDict, total=False):
 
 DEFAULT_SUMMARY_LANGUAGE = "English"
 DEFAULT_ENTITY_NAME_MAX_LENGTH = 256
+DEFAULT_TUPLE_DELIMITER = "<|#|>"
+DEFAULT_COMPLETION_DELIMITER = "<|COMPLETE|>"
 DEFAULT_ENTITY_TYPES = [
     "Person",
     "Creature",
@@ -281,7 +280,7 @@ def use_llm_func(
     system_prompt: str | None = None,
     max_tokens: int = None,
     history_messages: list[dict[str, str]] = None,
-) -> Chat:
+) -> str:
     safe_user_prompt = sanitize_text_for_encoding(user_prompt)
     safe_system_prompt = (
         sanitize_text_for_encoding(system_prompt) if system_prompt else None
@@ -299,29 +298,25 @@ def use_llm_func(
     try:
         user, _ = get_user_model().objects.get_or_create(username="lightrag_django")
         project, _ = Project.objects.get_or_create(name="lightrag_django")
-        chat = Chat.create(project=project)
-
-        if safe_system_prompt:
-            chat.create_system_message(safe_system_prompt, user=user)
-
-        chat.call_llm(
-            model_name=model_name,
-            message=safe_user_prompt,
+        dspy_chat = DSPyChat.create(project=project)
+        lm = dspy_chat.as_lm(
+            model=model_name,
             user=user,
-            include_chat_history=True,
-            max_tokens=max_tokens,
             use_cache=True,
+            max_tokens=max_tokens,
         )
+        messages: list[dict[str, str]] = []
+        if safe_system_prompt:
+            messages.append({"role": "system", "content": safe_system_prompt})
+        if safe_history_messages:
+            messages.extend(safe_history_messages)
+        messages.append({"role": "user", "content": safe_user_prompt})
+        response = lm.forward(messages=messages)
     except Exception as e:
         error_msg = f"[LLM func] {str(e)}"
         raise type(e)(error_msg) from e
 
-    return chat
-
-
-def get_chat_response_text(chat: Chat) -> str:
-    response_text = chat.last_llm_message.text if chat.last_llm_message else ""
-    return remove_think_tags(response_text)
+    return remove_think_tags(extract_dspy_response_text(response))
 
 
 def _truncate_entity_identifier(
@@ -647,29 +642,18 @@ def extract_entities(
     ordered_documents = list(documents.items())
     resolved_entity_types = entity_types or DEFAULT_ENTITY_TYPES
 
-    examples = "\n".join(
-        [
-            ENTITY_EXTRACTION_EXAMPLE_STORY,
-            ENTITY_EXTRACTION_EXAMPLE_MARKETS,
-            ENTITY_EXTRACTION_EXAMPLE_ATHLETICS,
-        ]
-    )
-
     example_context_base = {
         "tuple_delimiter": DEFAULT_TUPLE_DELIMITER,
         "completion_delimiter": DEFAULT_COMPLETION_DELIMITER,
         "entity_types": ", ".join(resolved_entity_types),
-        "language": language,
     }
-    # add example's format
-    examples = examples.format(**example_context_base)
+    examples = render_entity_extraction_examples(**example_context_base)
 
     context_base = {
         "tuple_delimiter": DEFAULT_TUPLE_DELIMITER,
         "completion_delimiter": DEFAULT_COMPLETION_DELIMITER,
         "entity_types": ",".join(resolved_entity_types),
         "examples": examples,
-        "language": language,
     }
 
     processed_documents = 0
@@ -690,25 +674,29 @@ def extract_entities(
 
         # Get initial extraction
         # Format system prompt without input_text for each document (enables prompt caching across documents)
-        entity_extraction_system_prompt = ENTITY_EXTRACTION_SYSTEM_PROMPT.format(
-            **context_base
+        entity_extraction_system_prompt = render_entity_extraction_system_prompt(
+            entity_types=context_base["entity_types"],
+            tuple_delimiter=context_base["tuple_delimiter"],
+            completion_delimiter=context_base["completion_delimiter"],
+            examples=context_base["examples"],
         )
-        # Format user prompts with input_text for each document
-        entity_extraction_user_prompt = ENTITY_EXTRACTION_USER_PROMPT.format(
-            **{**context_base, "input_text": content}
+        entity_extraction_user_prompt = render_entity_extraction_user_prompt(
+            entity_types=context_base["entity_types"],
+            completion_delimiter=context_base["completion_delimiter"],
+            input_text=content,
         )
         entity_continue_extraction_user_prompt = (
-            ENTITY_CONTINUE_EXTRACTION_USER_PROMPT.format(
-                **{**context_base, "input_text": content}
+            render_entity_continue_extraction_user_prompt(
+                tuple_delimiter=context_base["tuple_delimiter"],
+                completion_delimiter=context_base["completion_delimiter"],
             )
         )
 
-        initial_chat = use_llm_func(
+        final_result = use_llm_func(
             entity_extraction_user_prompt,
             model_name=model_name,
             system_prompt=entity_extraction_system_prompt,
         )
-        final_result = get_chat_response_text(initial_chat)
         timestamp = int(time.time())
 
         history = pack_user_ass_to_openai_messages(
@@ -748,13 +736,12 @@ def extract_entities(
                     f"Gleaning stopped for document {document_key}: Input tokens ({token_count}) exceeded limit ({max_extract_input_tokens})."
                 )
             else:
-                glean_chat = use_llm_func(
+                glean_result = use_llm_func(
                     entity_continue_extraction_user_prompt,
                     model_name=model_name,
                     system_prompt=entity_extraction_system_prompt,
                     history_messages=history,
                 )
-                glean_result = get_chat_response_text(glean_chat)
                 timestamp = int(time.time())
 
                 # Process gleaning result separately with file path

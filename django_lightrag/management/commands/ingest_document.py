@@ -2,10 +2,14 @@
 Django management command to ingest a document into LightRAG.
 """
 
+import logging
+
 from django.core.management.base import BaseCommand, CommandError
 
 from django_lightrag.config import get_lightrag_core_settings
 from django_lightrag.core import LightRAGCore
+
+logger = logging.getLogger(__name__)
 
 
 class Command(BaseCommand):
@@ -47,4 +51,5 @@ class Command(BaseCommand):
             finally:
                 core.close()
         except Exception as e:
+            logger.exception("Failed to ingest document")
             raise CommandError(f"Failed to ingest document: {e}") from e

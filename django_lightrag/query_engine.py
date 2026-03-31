@@ -1,11 +1,11 @@
 from typing import Any
 
-from django.db.models import Q
 from django.contrib.auth import get_user_model
-from django_llm_chat.chat import Chat
+from django.db.models import Q
 from django_llm_chat.models import Project
 
-
+from .dspy_runtime import run_dspy_signature
+from .prompts.retrieval_answer import RetrievalAnswerSignature
 from .storage import ChromaVectorStorage
 from .types import (
     QueryContext,
@@ -296,18 +296,6 @@ class QueryEngine:
         context.aggregated_context = "\n\n".join(aggregated_chunks)
         return context
 
-    generate_system_prompt = """You are a retrieval-augmented assistant.
-
-Answer the user using only the provided context.
-Do not invent, assume, or import outside knowledge.
-Preserve the user's language.
-If the context does not contain enough information, reply that you do not have enough information from the provided context.
-Do not add a references section or cite sources inline.
-
-Context:
-{context}
-"""
-
     def generate_response(
         self, query_text: str, context: QueryContext, param: QueryParam
     ) -> str:
@@ -317,26 +305,22 @@ Context:
         if not aggregated_context:
             return self.GROUNDED_FALLBACK_RESPONSE
 
-        system_prompt = self.generate_system_prompt.format(context=aggregated_context)
-
         try:
             user, _ = get_user_model().objects.get_or_create(username="lightrag_django")
             project, _ = Project.objects.get_or_create(name="lightrag_django")
-            chat = Chat.create(project=project)
-
-            chat.create_system_message(system_prompt, user=user)
-
-            chat.call_llm(
-                model_name=self.model,
-                message=query_text,
+            prediction = run_dspy_signature(
+                RetrievalAnswerSignature,
+                model=self.model,
+                project=project,
                 user=user,
-                include_chat_history=True,
+                inputs={"context": aggregated_context, "query_text": query_text},
                 temperature=param.temperature
                 if param.temperature is not None
                 else self.temperature,
                 use_cache=True,
             )
-            return chat.last_llm_message.text if chat.last_llm_message else ""
+            answer = str(getattr(prediction, "answer", "")).strip()
+            return answer or self.GROUNDED_FALLBACK_RESPONSE
         except Exception:
             return self.GROUNDED_FALLBACK_RESPONSE
 
